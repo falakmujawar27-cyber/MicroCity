@@ -1,0 +1,311 @@
+@import "tailwindcss";
+
+/*
+  MicroCity — Design Tokens (Visual Direction 2, user-directed)
+  Urban infrastructure intelligence identity.
+
+  Midnight black  #030303  — main dark identity, page ground
+  Obsidian        #15131F  — layered dark surfaces (panels, cards)
+  Electric violet #5245F8  — primary actions, active navigation, emphasis
+  Sun yellow      #F9B318  — secondary highlights, warnings, chart series
+  Warm ivory      #E8E4D3  — light text on dark + light editorial sections
+  Ivory deep      #DED5BC  — tinted light band
+
+  Status colours are labelled+iconed always; never colour-only.
+*/
+
+@theme {
+  --color-ink: #030303;
+  --color-obsidian: #15131f;
+  --color-obsidian-lift: #1d1b2a;
+  --color-violet: #5245f8;
+  /* Small text / active states on dark surfaces (6.6:1 on ink) */
+  --color-violet-bright: #8b84f4;
+  /* Violet for small text on LIGHT surfaces (7.8:1 on ivory) */
+  --color-violet-ink: #4235a8;
+  --color-gold: #f9b318;
+  --color-ivory: #e8e4d3;
+  --color-ivory-deep: #ded5bc;
+  --color-surface: #15131f;
+
+  /* Status tokens — always paired with an explicit word label and icon. */
+  /* On light (ivory) surfaces — all ≥ 4.5:1 */
+  --color-status-ok: #3d6b35;
+  --color-status-warn: #8a5a16;
+  --color-status-error: #8c2f25;
+  /* On dark (ink/obsidian) surfaces — all ≥ 7:1 */
+  --color-status-ok-dark: #58b07c;
+  --color-status-warn-dark: #f9b318;
+  --color-status-error-dark: #e07a6b;
+
+  --font-heading: "Playfair Display", Georgia, serif;
+  --font-body: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, Consolas, "Liberation Mono", monospace;
+}
+
+:root {
+  --color-ink: #030303;
+  --color-ink-rgb: 3, 3, 3;
+  --color-obsidian: #15131f;
+  --color-obsidian-lift: #1d1b2a;
+  --color-violet: #5245f8;
+  --color-violet-bright: #8b84f4;
+  --color-violet-ink: #4235a8;
+  --color-gold: #f9b318;
+  --color-ivory: #e8e4d3;
+  --color-ivory-rgb: 232, 228, 211;
+  --color-ivory-deep: #ded5bc;
+
+  /* Semantic colours */
+  --color-bg: var(--color-ink);
+  --color-surface: #15131f;
+  --color-text: var(--color-ivory);
+  --color-text-secondary: #b9b4d0;
+  --color-border: rgb(139 132 244 / 0.35);
+  --color-accent: var(--color-violet);
+  --color-accent-hover: #4638e8;
+
+  --font-heading: "Playfair Display", Georgia, serif;
+  --font-body: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, Consolas, "Liberation Mono", monospace;
+
+  --font-size-base: 16px;
+  --line-height-base: 150%;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  color: var(--color-text);
+  background-color: var(--color-bg);
+}
+
+/*
+  Workspace light theme (A2 / G3).
+  The signed-in app, sign-in screen and every non-hero surface use a light
+  warm paper ground with dark text. The dark identity and the serif face are
+  reserved for the landing hero only.
+  All muted text colours below are measured at >= 4.5:1 on the light ground.
+*/
+.theme-workspace {
+  --color-ink: #f4f1e8;
+  --color-ink-rgb: 244, 241, 232;
+  --color-obsidian: #ffffff;
+  --color-obsidian-lift: #faf8f2;
+  --color-ivory: #1c1a24;
+  --color-ivory-rgb: 28, 26, 36;
+  --color-ivory-deep: #35323d;
+  --color-violet: #4235a8;
+  --color-violet-bright: #4235a8;
+  --color-violet-ink: #4235a8;
+  --color-gold: #8a5a16;
+  --color-status-ok: #3d6b35;
+  --color-status-warn: #8a5a16;
+  --color-status-error: #8c2f25;
+  --color-status-ok-dark: #3d6b35;
+  --color-status-warn-dark: #8a5a16;
+  --color-status-error-dark: #8c2f25;
+  --font-heading: var(--font-body);
+  --font-size-base: 16px;
+  font-size: 1rem;
+  color: var(--color-ivory);
+}
+
+/* Opacity utilities were tuned for ivory text on black. On the light ground
+   they must be replaced with measured, solid muted inks so body copy keeps at
+   least 4.5:1 contrast. */
+.theme-workspace .text-ivory\/25,
+.theme-workspace .text-ivory\/30,
+.theme-workspace .text-ivory\/35 {
+  color: #6a6873;
+}
+.theme-workspace .text-ivory\/40,
+.theme-workspace .text-ivory\/45,
+.theme-workspace .text-ivory\/50,
+.theme-workspace .text-ivory\/55 {
+  color: #5c5a66;
+}
+.theme-workspace .text-ivory\/60,
+.theme-workspace .text-ivory\/65,
+.theme-workspace .text-ivory\/70 {
+  color: #4a4852;
+}
+.theme-workspace .text-ivory\/75,
+.theme-workspace .text-ivory\/80,
+.theme-workspace .text-ivory\/85 {
+  color: #34323d;
+}
+
+.theme-workspace .text-gold\/70,
+.theme-workspace .text-gold\/80,
+.theme-workspace .text-gold\/90 {
+  color: #74500f;
+}
+
+.theme-workspace .text-violet-bright\/50,
+.theme-workspace .text-violet-bright\/70,
+.theme-workspace .text-violet-bright\/80 {
+  color: #4235a8;
+}
+
+/* Solid accent surfaces always carry white text in this theme. */
+.theme-workspace [class~="bg-violet"],
+.theme-workspace [class~="bg-gold"] {
+  color: #ffffff;
+}
+
+/* Primary buttons need a full 44px touch target on small screens. */
+@media (max-width: 640px) {
+  .theme-workspace button,
+  .theme-workspace [role="button"],
+  .theme-workspace a[data-button] {
+    min-height: 44px;
+  }
+}
+
+/*
+  The only dark, serif surface in the product: the landing hero. Everything
+  else uses the light workspace theme above.
+*/
+.landing-hero {
+  --color-ink: #030303;
+  --color-ink-rgb: 3, 3, 3;
+  --color-obsidian: #15131f;
+  --color-obsidian-lift: #1d1b2a;
+  --color-ivory: #e8e4d3;
+  --color-ivory-rgb: 232, 228, 211;
+  --color-ivory-deep: #ded5bc;
+  --color-violet: #5245f8;
+  --color-violet-bright: #8b84f4;
+  --color-gold: #f9b318;
+  --font-heading: "Playfair Display", Georgia, serif;
+  background: var(--color-ink);
+  color: var(--color-ivory);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  line-height: 120%;
+  margin-top: 0;
+}
+
+p { margin-top: 0; }
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+a:hover { text-decoration: none; }
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Editorial rules */
+.arch-rule {
+  border-top-color: var(--color-border);
+}
+
+.diagram-container {
+  display: flex;
+  justify-content: center;
+}
+
+/* Diagram plates: dark obsidian cards with a violet hairline frame.
+   Diagrams are primary content, never ghosted. */
+.diagram-plate {
+  background: var(--color-obsidian);
+  border: 1px solid rgb(82 69 248 / 0.4);
+  padding: 1.25rem;
+  position: relative;
+}
+.diagram-plate::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 12px;
+  height: 12px;
+  border-top: 1.5px solid var(--color-gold);
+  border-left: 1.5px solid var(--color-gold);
+}
+
+.diagram-figure {
+  margin: 0;
+}
+
+@media (max-width: 1023px) {
+  .diagram-figure {
+    margin-bottom: 2rem;
+  }
+}
+
+.illustrative-caption {
+  font-size: 0.875rem;
+  color: var(--color-ivory);
+  opacity: 0.6;
+  margin-top: 0.75rem;
+  text-align: center;
+  font-family: var(--font-body);
+  font-style: italic;
+}
+
+.text-lead {
+  font-size: 1.25rem;
+  line-height: 1.6;
+}
+
+.text-small {
+  font-size: 0.875rem;
+}
+
+/* Focus visibility */
+*:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.focus-ring-dark:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  white-space: nowrap;
+}

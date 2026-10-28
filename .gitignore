@@ -1,0 +1,41 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+node_modules/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+.DS_Store
+coverage/
+# Local database files and backups (never commit data)
+server/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.wal
+*.shm
+# Scratch directories used for local browser verification
+.tmp-*/
