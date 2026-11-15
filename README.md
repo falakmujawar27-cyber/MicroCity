@@ -4,7 +4,7 @@
 
 MicroCity connects a college's physical records to day-to-day decisions: inventory, room capacity and timetable pressure, electricity and water consumption, maintenance complaints, public infrastructure reports, and a traceable plan/report workflow.
 
-The working loop is **Inventory → Needs & Gaps → Priority → Action → Report**. All figures are produced by deterministic code from recorded data. Missing values stay missing; they are never treated as zero. The optional AI assistant only explains computed facts and is always labelled **“AI-generated — please verify”**.
+The working loop is **Inventory → Needs & Gaps → Priority → Action → Report**. All figures are produced by deterministic code from recorded data. Missing values stay missing; they are never treated as zero. The optional AI assistant only explains computed facts and is always labelled **“AI-generated, please verify”**.
 
 > **Demonstration status.** This repository is a local, server-backed demonstration using the synthetic dataset `microcity-demo-2026-10`. Every institution, person, room, meter, complaint and measurement in the base workspace is fictional. Do not put real college data into this demo until the production items in [Known limitations](#known-limitations) are addressed.
 
@@ -67,7 +67,7 @@ Set `DEMO_MODE=true` on the server to show the optional **Demo mode** strip on t
 - Capability matrix in `src/domain/permissions.ts` shared by the UI and re-checked by the API on every request.
 - Role-aware navigation, route guards and an explicit “Not available for your role” page.
 - College switching only for accounts with more than one membership. The selected college is sent as `X-College-Id` and re-validated server-side on every request; another college's ID receives `403 college-forbidden`.
-- Students and faculty see only their own private campus reports. Maintenance sees only complaints assigned to them. Public urban records are shared across colleges.
+- Students and faculty see only their own private campus reports. Maintenance sees only complaints assigned to them. Public issues are visible only to members of the reporting college.
 
 ### 01 Inventory
 Buildings, rooms, assets, inspections, timetable bookings and shared public infrastructure assets with validated create/edit/delete. The server blocks deletion while other records still reference the item. Unit options for utility meters are managed in Resources.
@@ -77,26 +77,26 @@ Buildings, rooms, assets, inspections, timetable bookings and shared public infr
 - Utilisation is only shown when both attendance/occupancy evidence and seat capacity are recorded.
 - Score breakdowns, component values, bookings and capacity findings with a **How is this calculated?** dialog showing supporting records and limitations.
 - Missing capacity or attendance lowers confidence; it does not become a zero score.
+- Nearby area reuses the same table for five types. Conditions alone decide status under a labelled project assumption; daily users order ties only. Unknown conditions are excluded from the denominator. Nearby records belong to one college and only its administrator can add, edit or delete them. Reporting opens a shared public issue draft; it sends nothing to an authority.
 
 ### 03 Resources
 - Electricity and water meters with interval and cumulative readings, explicit missing-reading gaps, register resets, tariff periods and estimated costs where a tariff is recorded.
 - Trend charts, per-period changes, spike flags using a median-absolute-deviation rule, and a written method/limitations panel.
-- Resources are visible to admin, estates and maintenance; editing readings and tariffs follows the inventory permissions.
+- Resources are visible to admin and estates; maintenance uses assigned jobs and inspections. Editing readings and tariffs follows the inventory permissions.
 
 ### 04 Issues & Maintenance
 - Campus complaints and public urban infrastructure reports, with required category, building, room choice (a room or “not sure”) and a description of at least 15 characters. Vague entries such as “broken” are rejected by the server.
 - **My reports** for students/faculty, **assigned work** for maintenance, and the full college queue for admin/estates.
 - Assignment, status changes, resolution, inspection schedule and a deterministic priority score based on recorded severity, age, affected people, asset criticality and repeat history.
 - Priority explanation, repeat-issue grouping, inspections and a per-complaint activity timeline. Every write is recorded in the workspace audit trail.
-- Public issue updates are recorded separately and remain visible across colleges.
+- Public issues, including descriptions, notes, photos and reporter details, are visible only within the college where they were reported. Only that college's staff can update them.
 
 ### 05 Plan & Report
 - Plan options with capital cost, annual cost/savings, assumptions, risks, evidence, disruption, implementation time and seat effect.
 - Net annual benefit is calculated only when both cost and savings are recorded. Simple payback is calculated only when capital cost and a positive net benefit exist. Missing inputs are shown as not recorded.
 - Decision records with title, owner, follow-up, notes, status (proposed/approved/rejected/deferred), actor and timestamp. **Only an administrator can approve, reject or defer.**
 - Unaddressed critical/high findings are surfaced against the option register.
-- Deterministic Markdown report preview and download, plus a findings CSV export. The report includes methods, limitations, provenance and missing-evidence notes.
-- Optional **Ask your data** search. Without AI configured it uses a clearly labelled rule-based keyword search, not AI.
+- Deterministic Markdown preview/download, matching full-report CSV and print output. These include nearby rows, evidence tags, methods, limitations, provenance and missing-evidence notes.
 
 ### 06 Data Centre
 - Upload CSV, TSV, XLSX or XLS; per-sheet column mapping with auto-suggestions; template downloads for all 12 record categories.
@@ -116,7 +116,7 @@ Buildings, rooms, assets, inspections, timetable bookings and shared public infr
 - Seed tariffs are blank placeholders with the note **“Placeholder — enter the rate from your bill. Not a real tariff.”** Cost estimates appear only after a rate is entered; no seed tariff is presented as a real price.
 
 ### Overview
-- Computed critical findings, capacity shortfall slots, active complaints, utility flags, overdue inspections, role-specific summaries and the loop from evidence to decision.
+- Critical gaps count distinct items, not duplicate findings. “No plan yet” is a property of each gap. Open issues count active campus and shared public reports; Decisions waiting counts undecided options and proposals. Critical nearby types can appear in Fix these first.
 - Findings open in an explainer with computed evidence, limitations, methods and an optional AI narrative.
 
 ## Deterministic analyses
@@ -134,24 +134,53 @@ No analysis is produced by an AI model.
 
 The server exposes an optional explanation proxy. **No AI credentials are present in client code or browser storage.** Without configuration, the client shows rule-based explanations and reports that AI is not configured.
 
-Set these environment variables for the server process:
+Set these environment variables in the server process. `AI_API_URL` is the full chat-completions endpoint and takes precedence over `AI_BASE_URL`, which has `/chat/completions` appended when needed. Both endpoint names are supported; the key and endpoint stay server-side.
 
-```bash
-AI_BASE_URL=https://your-provider.example/v1
-AI_API_KEY=...
-AI_MODEL=...
-# optional, defaults to ${AI_BASE_URL}/chat/completions
-# AI_API_URL=https://your-provider.example/v1/chat/completions
+Required names: `AI_API_KEY`, `AI_MODEL`, and either `AI_API_URL` or `AI_BASE_URL`. Start the server from the terminal where those variables are configured.
+
+The provider must accept an OpenAI-compatible chat-completions request. AI tasks are authorised server-side: administrators and estates can use all tasks; maintenance can explain findings and categorise issues; students and faculty can categorise issues. The proxy returns `503` when unconfigured and `403` for a disallowed task. AI never creates, edits, approves, assigns or deletes records. Text typed in a report and the facts behind a finding are sent to the configured provider. Answers are number-checked against server-computed facts; unsupported answers are discarded.
+
+### Set AI configuration in PowerShell
+
+1. Open a terminal in the project folder. Enter your provider's full chat-completions endpoint in `AI_API_URL`, your key in `AI_API_KEY`, and the approved model name in `AI_MODEL`:
+
+   ```powershell
+   $env:AI_API_URL = '<full chat-completions endpoint>'
+   $env:AI_API_KEY = '<set privately in your terminal>'
+   $env:AI_MODEL = '<approved model name>'
+   npm start
+   ```
+
+   `AI_API_URL` is used as-is. The alternative `AI_BASE_URL` appends `/chat/completions` when needed. These are server-process environment variables, not browser settings.
+2. Never commit an API key, add it to this README or paste it into chat. Do not share screenshots or logs containing credentials.
+
+### Test-only rejected-answer demo
+
+This uses only the bundled fake provider and a fake credential; it does not call a real provider. Start the fake provider in one terminal:
+
+```powershell
+$env:MICROCITY_FAKE_AI_PORT = '8799'
+node tests/fake-ai-provider.ts
+```
+
+In a second terminal, start MicroCity with the fake endpoint and a separate demo database:
+
+```powershell
+$env:PORT = '8797'
+$env:MICROCITY_DB = '.tmp-phase-g2\fake.sqlite'
+$env:AI_API_URL = 'http://127.0.0.1:8799/v1/chat/completions'
+$env:AI_API_KEY = 'fake-only-test'
+$env:AI_MODEL = 'fake-model'
 npm start
 ```
 
-The provider must accept an OpenAI-compatible `chat/completions` request. AI tasks are authorised server-side: administrators and estates can use all tasks; maintenance can explain findings and categorise issues; students and faculty can categorise issues. The proxy returns `503` when unconfigured and `403` for a disallowed task. AI never creates, edits, approves, assigns or deletes records.
+Sign in as the sample administrator and explain the capacity finding `capacity-rm-bv-101`; the fake provider returns an unsupported number and the UI should show the labelled rule-based fallback. Stop both test processes afterward. Do not use the fake values with real data or a real provider.
 
 ## Data and provenance
 
 - Base workspace: `microcity-demo-2026-10`, hand-authored fictional records seeded from `server/seed.ts`. It is labelled synthetic everywhere it appears. Generated 24 Oct 2026; no external source; not for redistribution.
 - Imported records: supplied by the signed-in user. The app records the file, actor and time but cannot verify the source.
-- Public urban records are shared across colleges; campus records are isolated by `college_id` and enforced in the API.
+- Public infrastructure assets are shared; public issues are visible and editable only within the reporting college. Campus records are isolated by `college_id` and enforced in the API.
 - The externally expected workbook (`smartcampus_test_data.xlsx`) was not supplied. `src/data/registry.ts` marks it `unavailable` with the audit note. No local path is published, no loader reads it, and no record is presented as coming from it.
 - Bundled photographs are CC0/public-domain and logged in `public/images/CREDITS.md`.
 
@@ -186,7 +215,7 @@ The following are **not** production-complete:
 - Import/report operations are synchronous. Very large workbooks should use a job queue in production.
 - AI-assisted narratives were not live-tested because no provider credentials were supplied. The fallback path and provider-unconfigured behaviour are implemented and tested.
 - Excel visual layout, screenshot-based visual regression and cross-browser testing were not part of this verification pass.
-- "Ask your data" without AI is keyword search over computed findings, meters and options; it is not a natural-language query engine.
+- "Ask your data" maps questions to a fixed list of server-computed lookups; without AI, the same lookups are available as buttons.
 - Plan costs and savings are user-recorded figures, not estimates generated by the system.
 
 ## Verification summary

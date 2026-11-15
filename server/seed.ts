@@ -17,6 +17,7 @@ import type {
   Room,
   Tariff,
   TimetableSlot,
+  NearbyAsset,
   UrbanAsset,
   UrbanIssue,
   UtilityMeter,
@@ -62,6 +63,12 @@ export const SAMPLE_ACCOUNTS: SampleAccountSeed[] = [
 export const SEED_COLLEGES = [
   { id: 'clg-bv', name: 'Vidya Nagar College (fictional)', code: 'VIDYA-NAGAR' },
   { id: 'clg-fd', name: 'Seva Nagar College (fictional)', code: 'SEVA-NAGAR' },
+]
+
+export const SEED_NEARBY_ASSETS: NearbyAsset[] = [
+  { id: 'near-bv-light', collegeId: 'clg-bv', type: 'streetlight', locationDescription: 'Approach road near college gate (Illustrative)', distanceMetres: 25, distanceBasis: 'estimated', condition: 'fair', dailyUsers: 120, usersMethod: 'Illustrative placeholder for a daily-use estimate; no observation was made.', responsibleAuthority: 'Local ward office (Illustrative)', basis: 'illustrative' },
+  { id: 'near-bv-footpath', collegeId: 'clg-bv', type: 'footpath', locationDescription: 'Footpath section near college gate (Illustrative)', distanceMetres: 40, distanceBasis: 'estimated', condition: 'poor', dailyUsers: 240, usersMethod: 'Illustrative placeholder for a daily-use estimate; no observation was made.', responsibleAuthority: 'Local ward office (Illustrative)', basis: 'illustrative' },
+  { id: 'near-bv-water', collegeId: 'clg-bv', type: 'drinking_water', locationDescription: 'Water point near college gate (Illustrative)', distanceMetres: 10, distanceBasis: 'estimated', condition: 'good', dailyUsers: null, usersMethod: null, responsibleAuthority: 'Local ward office (Illustrative)', basis: 'illustrative' },
 ]
 
 export const SEED_BUILDINGS: Building[] = [

@@ -1,12 +1,16 @@
 import type {
   AttendanceReason,
   AttendanceRecord,
+  Decision,
   ImportOutcome,
   ImportSheetInput,
   Inspection,
   InspectionResult,
+  NeedsLimitConfig,
+  PriorityWeights,
   RegisterInput,
   SessionInfo,
+  ThresholdKind,
   UserRole,
   UserSummary,
   WorkspacePayload,
@@ -35,6 +39,13 @@ export class ApiError extends Error {
 
 export type AiTask = 'explain-finding' | 'report-summary' | 'option-comparison' | 'categorise-issue' | 'ask-data'
 
+export interface AiSuggestion {
+  category: string | null
+  roomId: string | null
+  roomLabel: string | null
+  severity: string | null
+}
+
 export interface AiAssistResponse {
   ok: boolean
   configured: boolean
@@ -43,6 +54,20 @@ export interface AiAssistResponse {
   error?: string
   label?: string
   checkedAt?: string
+  /** True when the guarded answer passed the number guard. */
+  accepted?: boolean
+  /** Rejection reason code, e.g. unsupported_number, malformed_json. */
+  reason?: string
+  suggestion?: AiSuggestion | null
+  similarReports?: { count: number; samples: { ticketNumber: string | null; status: string; raisedAt: string }[] }
+  mapped?: boolean
+  message?: string
+  supported?: string[]
+  lookupId?: string
+  question?: string
+  title?: string
+  items?: { label: string; detail: string; tag: string }[]
+  note?: string
 }
 
 export interface ImportRequest {
@@ -161,8 +186,23 @@ export const api = {
     return request<{ configured: boolean; model: string | null; label: string }>('/ai/status')
   },
 
-  aiAssist(input: { task: AiTask; facts: unknown; question?: string }) {
+  aiAssist(input: { task: AiTask; facts?: unknown; question?: string; text?: string; finding?: unknown }) {
     return request<AiAssistResponse>('/ai/assist', { method: 'POST', body: input })
+  },
+
+  /** Server-computed lookup, also usable when AI is not configured. */
+  dataLookup(lookupId: string) {
+    return request<AiAssistResponse>('/data-lookup', { method: 'POST', body: { lookupId } })
+  },
+
+  adminAiSettings() {
+    return request<{
+      configured: boolean
+      model: string | null
+      callsToday: number
+      rejectedToday: number
+      dataNote: string
+    }>('/admin/ai-settings')
   },
 
   createRecord<T>(entity: string, data: Record<string, unknown>) {
@@ -187,14 +227,14 @@ export const api = {
     followUp?: string
     notes?: string
   }) {
-    return request<{ record: unknown }>('/decisions', { method: 'POST', body: { data } })
+    return request<{ record: Decision }>('/decisions', { method: 'POST', body: { data } })
   },
 
   updateDecision(
     id: string,
     data: Partial<{ title: string; status: string; ownerUserId: string | null; followUp: string; notes: string }>,
   ) {
-    return request<{ record: unknown }>(`/decisions/${encodeURIComponent(id)}`, {
+    return request<{ record: Decision }>(`/decisions/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: { data },
     })
@@ -209,6 +249,39 @@ export const api = {
       method: 'PATCH',
       body: { role },
     })
+  },
+
+  saveNeedsLimit(
+    category: string,
+    input: { limit: number; unit: string; source: string; kind: ThresholdKind },
+  ) {
+    return request<{ config: NeedsLimitConfig; needsLimits: NeedsLimitConfig[] }>(
+      `/needs-limits/${encodeURIComponent(category)}`,
+      { method: 'PATCH', body: input },
+    )
+  },
+
+  savePriorityWeights(input: Pick<PriorityWeights, 'severity' | 'condition' | 'usersAffected' | 'daysOpen'>) {
+    return request<{ weights: PriorityWeights }>('/priority-weights', { method: 'PATCH', body: input })
+  },
+
+  adminAudit() {
+    return request<{
+      audit: {
+        id: string
+        action: string
+        entity: string
+        entityId: string | null
+        detail: string
+        actorName: string | null
+        at: string
+        metadata: string | null
+      }[]
+    }>('/admin/audit')
+  },
+
+  adminRoleMatrix() {
+    return request<{ capabilities: { capability: string; roles: UserRole[] }[] }>('/admin/role-matrix')
   },
 
   importPreview(payload: ImportRequest) {
@@ -264,5 +337,12 @@ export const api = {
       body: input,
       collegeId,
     })
+  },
+
+  /** Complaint photos are served by an authorised endpoint, never listed inline. */
+  complaintPhotoUrl(id: string, kind: 'report' | 'completion', collegeId?: string | null) {
+    const params = new URLSearchParams({ kind })
+    if (collegeId) params.set('collegeId', collegeId)
+    return `/api/complaints/${encodeURIComponent(id)}/photo?${params.toString()}`
   },
 }

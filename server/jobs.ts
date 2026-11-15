@@ -43,15 +43,17 @@ export function jobGroupOf(status: ComplaintStatus): JobGroup {
 
 /**
  * The reason line quotes three values that already exist on the triage score:
- * the recorded severity, the age in days and the people-affected count. When a
- * count was never recorded it says so instead of implying zero.
+ * the recorded severity, the age in days and the people-affected count. The
+ * count is entered by the reporter, so it is named as reported rather than
+ * estimated; when it was never recorded the line says so instead of implying
+ * zero.
  */
 function reasonLine(priority: ComplaintPriority): string {
   const age = `${priority.ageDays} ${priority.ageDays === 1 ? 'day' : 'days'} open`
   const people =
     priority.peopleAffected === null
       ? 'number affected not recorded'
-      : `about ${priority.peopleAffected} ${priority.peopleAffected === 1 ? 'person' : 'people'} affected`
+      : `${priority.peopleAffected} ${priority.peopleAffected === 1 ? 'person' : 'people'} affected (as reported)`
   return `${SEVERITY_WORDS[priority.severity]}, ${age}, ${people}`
 }
 
@@ -68,10 +70,13 @@ export function buildJobCards(
   buildings: Building[],
   assets: Asset[],
   asOf: string,
+  analysisScope: Complaint[] = complaints,
 ): JobCard[] {
-  // Only active complaints are ranked by the existing analysis, so the full
-  // list is passed and finished jobs are described from their own fields.
-  const analysis = analyseMaintenance(rooms, buildings, assets, [], complaints, [], [], asOf)
+  // Priority points and repeat counts must describe the whole college, even
+  // when only one technician's jobs are being listed. The analysis runs over
+  // analysisScope and only the listed complaints are turned into cards, so no
+  // other person's job details can reach the board.
+  const analysis = analyseMaintenance(rooms, buildings, assets, [], analysisScope, [], [], asOf)
   const priorityById = new Map(analysis.ranked.map((item) => [item.complaintId, item]))
   const roomById = new Map(rooms.map((room) => [room.id, room]))
   const buildingById = new Map(buildings.map((building) => [building.id, building]))
@@ -98,9 +103,13 @@ export function buildJobCards(
       typeof complaint.completionPhotoName === 'string' && complaint.completionPhotoName.trim()
         ? complaint.completionPhotoName.trim()
         : null
+    // A close without repair records closedAt, not resolvedAt, so the done date
+    // falls back to it without ever calling the job fixed.
+    const finishedAt = complaint.resolvedAt ?? complaint.closedAt ?? null
 
     return {
       id: complaint.id,
+      collegeId: complaint.collegeId,
       ticketNumber: complaint.ticketNumber ?? null,
       title: reportTitle(complaint.description),
       category: complaint.category,
@@ -114,17 +123,22 @@ export function buildJobCards(
         : null,
       openDays: priority
         ? priority.ageDays
-        : complaint.resolvedAt
-          ? daysBetween(complaint.raisedAt, complaint.resolvedAt)
+        : finishedAt
+          ? daysBetween(complaint.raisedAt, finishedAt)
           : daysBetween(complaint.raisedAt, asOf),
       peopleAffected: complaint.peopleAffected,
       raisedAt: complaint.raisedAt,
       raisedOn: formatIstDate(complaint.raisedAt),
-      completedAt: complaint.resolvedAt,
-      completedOn: complaint.resolvedAt ? formatIstDate(complaint.resolvedAt) : null,
+      completedAt: finishedAt,
+      completedOn: finishedAt ? formatIstDate(finishedAt) : null,
       completionNote,
       completionPhotoName,
       hasCompletionPhoto: Boolean(complaint.completionPhotoDataUrl),
+      repaired: Boolean(complaint.resolvedAt) || Boolean(completionNote),
+      closedReason:
+        typeof complaint.closedReason === 'string' && complaint.closedReason.trim()
+          ? complaint.closedReason.trim()
+          : null,
       linkedAssetId: complaint.assetId,
     } satisfies JobCard
   })
@@ -142,6 +156,7 @@ export function buildInspectionCards(
   inspections: Inspection[],
   assets: Asset[],
   asOf: string,
+  nameOf: (userId: string | null) => string | null = () => null,
 ): InspectionCard[] {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]))
   const reference = Date.parse(asOf)
@@ -167,6 +182,7 @@ export function buildInspectionCards(
       id: inspection.id,
       assetId: inspection.assetId,
       assetName: asset?.name ?? 'Asset name not recorded',
+      inspectorName: nameOf(inspection.inspectorUserId ?? null),
       status: inspection.status,
       scheduledFor: inspection.scheduledFor,
       scheduledOn: inspection.scheduledFor ? formatIstDate(inspection.scheduledFor) : null,

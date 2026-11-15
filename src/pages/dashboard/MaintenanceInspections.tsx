@@ -36,6 +36,7 @@ function InspectionRow({
             ? `due in ${inspection.days ?? 0} days`
             : `due in ${inspection.days ?? 0} days`}
       </p>
+      <p className="mt-0.5 text-xs text-ivory/50">Inspector: {inspection.inspectorName ?? 'Unassigned'}</p>
       <div className="mt-3">
         <InspectionForm inspection={inspection} collegeId={collegeId} onSaved={onSaved} />
       </div>
@@ -85,7 +86,8 @@ export default function MaintenanceInspections() {
         <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Maintenance</p>
       </div>
       <p className="mt-2 text-sm leading-relaxed text-ivory/65">
-        Inspections scheduled for you. Recording one saves today&apos;s date on the server.
+        Inspections for your college. Unassigned ones are open to the whole maintenance team; recording one assigns it
+        to you and saves today&apos;s date on the server.
       </p>
 
       {error && (

@@ -190,7 +190,7 @@ export default function App() {
             <Route
               path="data-centre"
               element={
-                <RequireRole allowed={['admin', 'estates']}>
+                <RequireRole allowed={['admin']}>
                   <DataCentre />
                 </RequireRole>
               }

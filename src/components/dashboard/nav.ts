@@ -8,12 +8,12 @@ export interface DashboardNavItem {
 }
 
 const ALL: DashboardNavItem[] = [
-  { label: 'Overview', path: '/dashboard', hint: 'Priority findings and module status' },
+  { label: 'Overview', path: '/dashboard', hint: 'Priority findings and the planning loop' },
   { label: 'Inventory', path: '/dashboard/inventory', hint: 'Buildings, rooms, assets, inspections' },
-  { label: 'Needs & Gaps', path: '/dashboard/needs-gaps', hint: 'Capacity, utilisation and needs scores' },
+  { label: 'Needs and Gaps', path: '/dashboard/needs-gaps', hint: 'Demand against capacity by category' },
   { label: 'Resources', path: '/dashboard/resources', hint: 'Electricity, water and tariffs' },
-  { label: 'Issues & Maintenance', path: '/dashboard/issues-maintenance', hint: 'Complaints, public issues, inspections' },
-  { label: 'Plan & Report', path: '/dashboard/plan-report', hint: 'Options, decisions and exports' },
+  { label: 'Issues and Maintenance', path: '/dashboard/issues-maintenance', hint: 'Complaints, public issues, inspections' },
+  { label: 'Plan and Report', path: '/dashboard/plan-report', hint: 'Options, decisions and exports' },
   { label: 'Data Centre', path: '/dashboard/data-centre', hint: 'Import and audit history' },
   { label: 'Help', path: '/dashboard/help', hint: 'Using the workspace and your role' },
   { label: 'Administration', path: '/dashboard/administration', hint: 'Roles, accounts and AI status' },
@@ -51,20 +51,30 @@ export function dashboardNavFor(role: UserRole | null): DashboardNavItem[] {
   }
   return byPath(
     '/dashboard',
-    '/dashboard/inventory',
     '/dashboard/needs-gaps',
     '/dashboard/resources',
     '/dashboard/issues-maintenance',
+    '/dashboard/plan-report',
   )
 }
 
-/** Secondary staff links shown in the top bar, outside the sidebar. */
+/**
+ * Secondary staff links shown beneath the five primary items: the record
+ * register, and the account/profile help page. Administration is never here;
+ * it is reached from the profile menu.
+ */
+export function dashboardSecondaryNavFor(role: UserRole | null): DashboardNavItem[] {
+  if (role !== 'admin' && role !== 'estates') return []
+  return byPath('/dashboard/inventory', '/dashboard/help')
+}
+
+/** Items that appear in the profile menu or are used for page labels. */
 export function dashboardMoreNavFor(role: UserRole | null): DashboardNavItem[] {
   if (role === 'admin') {
-    return byPath('/dashboard/plan-report', '/dashboard/data-centre', ADMINISTRATION, HELP)
+    return byPath('/dashboard/data-centre', ADMINISTRATION, HELP)
   }
   if (role === 'estates') {
-    return byPath('/dashboard/plan-report', '/dashboard/data-centre', HELP)
+    return byPath(HELP)
   }
   return []
 }

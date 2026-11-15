@@ -18,7 +18,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
     [...dashboardNavFor(role), ...dashboardMoreNavFor(role)],
     pathname,
   )
-  const more = dashboardMoreNavFor(role)
+  const isAdmin = role === 'admin'
   const memberships = session?.memberships ?? []
   const activeId = workspace?.activeCollege.id ?? ''
 
@@ -58,42 +58,14 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
             {current}
           </span>
           <span
-            className="hidden items-center gap-1.5 border border-gold/50 px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-widest text-gold md:inline-flex"
+            className="inline-flex items-center gap-1.5 border border-gold/50 px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-widest text-gold"
           >
             <span aria-hidden="true" className="h-1.5 w-1.5 bg-gold" />
-            Demo data
+            {workspace?.provenance.synthetic ? 'Demo data' : 'Recorded data'}
           </span>
         </div>
 
         <div className="flex min-w-0 items-center gap-2.5">
-          {more.length > 0 && (
-            <details key={pathname} className="relative">
-              <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-md border border-violet/40 px-3 py-1.5 text-xs font-semibold text-ivory/80 hover:bg-violet/15 focus-ring [&::-webkit-details-marker]:hidden">
-                More
-                <span aria-hidden="true" className="text-[0.625rem] text-gold">▾</span>
-              </summary>
-              <nav
-                aria-label="More workspace pages"
-                className="absolute right-0 z-40 mt-2 w-56 border border-violet/40 bg-obsidian p-1 shadow-lg"
-              >
-                {more.map((item) => (
-                  <NavLink
-                    key={item.path}
-                    to={item.path}
-                    title={item.hint}
-                    className={({ isActive }) =>
-                      `block px-3 py-2.5 text-sm focus-ring ${
-                        isActive ? 'bg-violet/15 text-ivory' : 'text-ivory/75 hover:bg-violet/10 hover:text-ivory'
-                      }`
-                    }
-                  >
-                    {item.label}
-                  </NavLink>
-                ))}
-              </nav>
-            </details>
-          )}
-
           {memberships.length > 1 ? (
             <label className="flex items-center gap-2">
               <span className="sr-only">Active college</span>
@@ -117,22 +89,70 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
           )}
 
           {session ? (
-            <div className="hidden items-center gap-2 sm:flex">
-              <span className="max-w-36 truncate text-sm text-ivory/80">{session.user.displayName}</span>
-              {role && (
-                <span className="rounded-md border border-violet/40 px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-wider text-violet-bright">
-                  {ROLE_LABELS[role]}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => void handleSignOut()}
-                disabled={signingOut}
-                className="rounded-md border border-violet/40 px-3 py-1.5 text-xs font-semibold text-ivory/80 hover:bg-violet/15 focus-ring disabled:opacity-50"
+            <details key={pathname} className="relative hidden sm:block">
+              <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-md border border-violet/40 px-3 py-1.5 text-xs font-semibold text-ivory/80 hover:bg-violet/15 focus-ring [&::-webkit-details-marker]:hidden">
+                <span className="max-w-36 truncate text-sm text-ivory/80">{session.user.displayName}</span>
+                {role && (
+                  <span className="rounded-md border border-violet/40 px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-wider text-violet-bright">
+                    {ROLE_LABELS[role]}
+                  </span>
+                )}
+                <span aria-hidden="true" className="text-[0.625rem] text-gold">▾</span>
+              </summary>
+              <nav
+                aria-label="Profile menu"
+                className="absolute right-0 z-40 mt-2 w-60 border border-violet/40 bg-obsidian p-1 shadow-lg"
               >
-                {signingOut ? 'Signing out…' : 'Sign out'}
-              </button>
-            </div>
+                <div className="border-b border-violet/20 px-3 py-2.5">
+                  <p className="truncate text-sm text-ivory">{session.user.displayName}</p>
+                  <p className="mt-0.5 truncate font-mono text-[0.625rem] text-ivory/45">
+                    {session.user.username} · {workspace?.activeCollege.name ?? 'No college'}
+                  </p>
+                </div>
+                <NavLink
+                  to="/dashboard/help"
+                  className={({ isActive }) =>
+                    `block px-3 py-2.5 text-sm focus-ring ${
+                      isActive ? 'bg-violet/15 text-ivory' : 'text-ivory/75 hover:bg-violet/10 hover:text-ivory'
+                    }`
+                  }
+                >
+                  Profile and Help
+                </NavLink>
+                {isAdmin && (
+                  <>
+                    <NavLink
+                      to="/dashboard/data-centre"
+                      className={({ isActive }) =>
+                        `block px-3 py-2.5 text-sm focus-ring ${
+                          isActive ? 'bg-violet/15 text-ivory' : 'text-ivory/75 hover:bg-violet/10 hover:text-ivory'
+                        }`
+                      }
+                    >
+                      Data Centre
+                    </NavLink>
+                    <NavLink
+                      to="/dashboard/administration"
+                      className={({ isActive }) =>
+                        `block px-3 py-2.5 text-sm focus-ring ${
+                          isActive ? 'bg-violet/15 text-ivory' : 'text-ivory/75 hover:bg-violet/10 hover:text-ivory'
+                        }`
+                      }
+                    >
+                      Administration
+                    </NavLink>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void handleSignOut()}
+                  disabled={signingOut}
+                  className="block w-full px-3 py-2.5 text-left text-sm text-ivory/75 hover:bg-violet/10 hover:text-ivory focus-ring disabled:opacity-50"
+                >
+                  {signingOut ? 'Signing out…' : 'Sign out'}
+                </button>
+              </nav>
+            </details>
           ) : (
             <Link
               to="/signin"

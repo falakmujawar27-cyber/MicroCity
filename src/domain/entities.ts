@@ -1,3 +1,4 @@
+import { NEARBY_TYPE_LABELS } from './types.ts'
 import type { AssetCondition, Severity, UrbanAssetCategory, UtilityType, ComplaintStatus, InspectionStatus, ReadingType, OptionType } from './types.ts'
 
 export type FieldType =
@@ -54,6 +55,26 @@ const urbanAssetCategoryEnum: readonly UrbanAssetCategory[] = [
 ]
 
 export const ENTITY_SPECS: EntitySpec[] = [
+  {
+    entity: 'nearbyAssets',
+    label: 'Nearby assets',
+    scope: 'campus',
+    importable: false,
+    order: 16,
+    naturalKey: 'ID',
+    fields: [
+      idField,
+      { key: 'type', label: 'Type', type: 'enum', required: true, enumValues: Object.keys(NEARBY_TYPE_LABELS), aliases: [] },
+      { key: 'locationDescription', label: 'Location description', type: 'string', required: true, aliases: [] },
+      { key: 'distanceMetres', label: 'Distance from college gate (m)', type: 'number', required: true, aliases: [] },
+      { key: 'distanceBasis', label: 'Distance basis', type: 'enum', required: true, enumValues: ['measured', 'estimated'], aliases: [] },
+      { key: 'condition', label: 'Condition', type: 'nullable-enum', required: false, enumValues: conditionEnum, aliases: [] },
+      { key: 'dailyUsers', label: 'Estimated daily users', type: 'nullable-integer', required: false, aliases: [] },
+      { key: 'usersMethod', label: 'How daily users were obtained', type: 'nullable-string', required: false, aliases: [] },
+      { key: 'responsibleAuthority', label: 'Responsible authority', type: 'string', required: true, aliases: [] },
+      { key: 'basis', label: 'Basis tag', type: 'enum', required: true, enumValues: ['measured', 'estimated', 'illustrative'], aliases: [] },
+    ],
+  },
   {
     entity: 'buildings',
     label: 'Buildings',
@@ -156,6 +177,7 @@ export const ENTITY_SPECS: EntitySpec[] = [
       { key: 'unit', label: 'Unit', type: 'string', required: true, aliases: ['unit', 'measurement unit'] },
       { key: 'readingType', label: 'Reading type', type: 'enum', required: true, enumValues: readingTypeEnum, aliases: ['reading type', 'meter type', 'cumulative or interval'] },
       { key: 'label', label: 'Meter label', type: 'string', required: true, aliases: ['meter', 'meter label', 'meter name', 'name'] },
+      { key: 'measurementType', label: 'Measurement type', type: 'enum', required: false, enumValues: ['measured', 'estimated'] as const, aliases: ['measurement type', 'measured or estimated', 'reading source'] },
     ],
   },
   {
@@ -186,7 +208,7 @@ export const ENTITY_SPECS: EntitySpec[] = [
       { key: 'utility', label: 'Utility', type: 'enum', required: true, enumValues: utilityEnum, aliases: ['utility', 'type'] },
       { key: 'unit', label: 'Unit', type: 'string', required: true, aliases: ['unit'] },
       { key: 'currency', label: 'Currency', type: 'string', required: true, aliases: ['currency', 'currency code'] },
-      { key: 'ratePerUnit', label: 'Rate per unit', type: 'number', required: true, aliases: ['rate', 'rate per unit', 'unit cost', 'price'] },
+      { key: 'ratePerUnit', label: 'Rate per unit', type: 'nullable-number', required: false, aliases: ['rate', 'rate per unit', 'unit cost', 'price'] },
       { key: 'standingChargePerPeriod', label: 'Standing charge per period', type: 'nullable-number', required: false, aliases: ['standing charge', 'fixed charge'] },
       { key: 'effectiveFrom', label: 'Effective from', type: 'iso-date', required: true, aliases: ['effective from', 'start date', 'valid from'] },
       { key: 'note', label: 'Note', type: 'nullable-string', required: false, aliases: ['note', 'source', 'description'], note: 'Record the tariff source here so estimates are not mistaken for supplied prices.' },

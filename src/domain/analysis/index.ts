@@ -2,12 +2,15 @@
  * One deterministic analysis pass over the workspace records visible to the
  * signed-in user. The AI layer may only explain these computed facts.
  */
-import type { DatasetSources } from '../types.ts'
+import type { DatasetSources, PriorityWeights } from '../types.ts'
+import { DEFAULT_PRIORITY_WEIGHTS } from '../types.ts'
 import { analyseNeeds, type NeedsAnalysis } from './capacity.ts'
 import { analyseMaintenance, type MaintenanceAnalysis } from './maintenance.ts'
 import { analysePlan, type PlanAnalysis } from './plan.ts'
 import { analyseUtilities, type UtilitiesAnalysis } from './utilities.ts'
 import { sortFindings, type Finding, type FindingSeverity } from './types.ts'
+import { analyseNearby, nearbyFindings, type NearbyRow } from './nearby.ts'
+import { buildGapItems, type GapItem } from './gaps.ts'
 
 export interface AnalysisBundle {
   asOf: string
@@ -15,11 +18,17 @@ export interface AnalysisBundle {
   utilities: UtilitiesAnalysis
   maintenance: MaintenanceAnalysis
   plan: PlanAnalysis
+  nearby: NearbyRow[]
+  gaps: GapItem[]
   findings: Finding[]
   findingCounts: Record<FindingSeverity, number>
 }
 
-export function analyseWorkspace(dataset: DatasetSources, asOf: string = new Date().toISOString()): AnalysisBundle {
+export function analyseWorkspace(
+  dataset: DatasetSources,
+  asOf: string = new Date().toISOString(),
+  weights: PriorityWeights = DEFAULT_PRIORITY_WEIGHTS,
+): AnalysisBundle {
   const capacity = analyseNeeds(
     dataset.rooms,
     dataset.timetableSlots,
@@ -42,9 +51,11 @@ export function analyseWorkspace(dataset: DatasetSources, asOf: string = new Dat
     dataset.urbanIssues,
     dataset.urbanAssets,
     asOf,
+    weights,
   )
 
-  const sourceFindings = [...capacity.findings, ...utilities.findings, ...maintenance.findings]
+  const nearby = analyseNearby(dataset.nearbyAssets)
+  const sourceFindings = [...capacity.findings, ...utilities.findings, ...maintenance.findings, ...nearbyFindings(nearby)]
   const plan = analysePlan(dataset.planOptions, dataset.decisions, sourceFindings)
   const findings = sortFindings([...sourceFindings, ...plan.findings])
 
@@ -63,6 +74,8 @@ export function analyseWorkspace(dataset: DatasetSources, asOf: string = new Dat
     utilities,
     maintenance,
     plan,
+    nearby,
+    gaps: buildGapItems(sourceFindings, plan.matchedFindingIds),
     findings,
     findingCounts,
   }
@@ -73,4 +86,7 @@ export * from './capacity.ts'
 export * from './utilities.ts'
 export * from './maintenance.ts'
 export * from './plan.ts'
+export * from './needs-categories.ts'
+export * from './nearby.ts'
+export * from './gaps.ts'
 export * from './types.ts'

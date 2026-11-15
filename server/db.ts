@@ -23,6 +23,7 @@ import {
   SEED_DECISIONS,
   SEED_INSPECTIONS,
   SEED_METERS,
+  SEED_NEARBY_ASSETS,
   SEED_PLAN_OPTIONS,
   SEED_PROVENANCE,
   SEED_READINGS,
@@ -130,6 +131,8 @@ export interface Database {
   countEntity: (entity: string, collegeId: string | null) => number
   getMeta: (key: string) => string | null
   setMeta: (key: string, value: string) => void
+  addAiCall: (input: { userId: string; feature: string; refId: string | null; accepted: boolean; reason: string }) => void
+  aiCallsToday: (dayUtc?: string) => { calls: number; rejected: number }
 }
 
 export function createDatabase(path = ':memory:', seed = true): Database {
@@ -209,6 +212,20 @@ export function createDatabase(path = ':memory:', seed = true): Database {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    /* Phase G, additive and idempotent: one row per AI provider attempt.
+       Prompt text, user-typed complaint text, names and response bodies are
+       deliberately never stored here — only who, when, which feature, and
+       whether the guarded answer was accepted or rejected. */
+    CREATE TABLE IF NOT EXISTS ai_calls (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      at TEXT NOT NULL,
+      feature TEXT NOT NULL,
+      ref_id TEXT,
+      accepted INTEGER NOT NULL,
+      reason TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_calls_at ON ai_calls (at);
   `)
 
   const collegeColumns = sql.prepare('PRAGMA table_info(colleges)').all() as { name?: string }[]
@@ -519,14 +536,77 @@ export function createDatabase(path = ':memory:', seed = true): Database {
     setMeta(key, value) {
       sql.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value)
     },
+
+    addAiCall(input) {
+      sql
+        .prepare(
+          'INSERT INTO ai_calls (id, user_id, at, feature, ref_id, accepted, reason) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run(
+          `aic-${randomUUID()}`,
+          input.userId,
+          new Date().toISOString(),
+          input.feature,
+          input.refId,
+          input.accepted ? 1 : 0,
+          input.reason,
+        )
+    },
+
+    aiCallsToday(dayUtc) {
+      const day = dayUtc ?? new Date().toISOString().slice(0, 10)
+      const row = sql
+        .prepare(
+          `SELECT COUNT(*) AS calls,
+                  SUM(CASE WHEN accepted = 0 THEN 1 ELSE 0 END) AS rejected
+           FROM ai_calls WHERE substr(at, 1, 10) = ?`,
+        )
+        .get(day) as { calls: number; rejected: number | null }
+      return { calls: Number(row.calls ?? 0), rejected: Number(row.rejected ?? 0) }
+    },
   }
 
   if (seed) {
     seedDatabase(db)
     applyDemoLocalisation(db)
     applyPhaseCTickets(db)
+    applyNearbyDemoSeed(db)
+    applyUrbanIssueScoping(db)
   }
   return db
+}
+
+/**
+ * Phase G, additive and idempotent: public issues become college-scoped for
+ * viewing. Existing rows gain a `reporterCollegeId` derived from the
+ * reporter's membership when it is unambiguous. No column is renamed and no
+ * record is replaced; the meta key makes the pass run at most once.
+ */
+export function applyUrbanIssueScoping(db: Database): void {
+  const key = 'urban-issue-scope-v1'
+  if (db.getMeta(key)) return
+  let assigned = 0
+  for (const record of db.listRecords('urbanIssues', null)) {
+    if (typeof record.data.reporterCollegeId === 'string' && record.data.reporterCollegeId) continue
+    const reporterId = typeof record.data.reporterId === 'string' ? record.data.reporterId : ''
+    const memberships = reporterId ? db.getMemberships(reporterId) : []
+    if (memberships.length !== 1) continue
+    db.updateRecord(record.id, { ...record.data, reporterCollegeId: memberships[0].collegeId })
+    assigned += 1
+  }
+  db.setMeta(key, new Date().toISOString())
+  if (assigned > 0) {
+    db.addAudit({
+      collegeId: null,
+      actorId: 'system',
+      actorName: 'System',
+      action: 'migration',
+      entity: 'urbanIssues',
+      entityId: null,
+      detail: `Assigned an origin college to ${assigned} public issue record(s) so viewing is college-scoped.`,
+      metadata: null,
+    })
+  }
 }
 
 function rowToRecord(row: Record<string, unknown>): StoredRecord {
@@ -539,6 +619,32 @@ function rowToRecord(row: Record<string, unknown>): StoredRecord {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     source: String(row.source),
+  }
+}
+
+export function applyNearbyDemoSeed(db: Database): void {
+  const key = 'nearby-demo-seed-v1'
+  if (db.getMeta(key) || db.getMeta('baseDataset') !== SEED_PROVENANCE.name) return
+  if (!db.listColleges().some((college) => college.id === 'clg-bv')) return
+  db.sql.exec('BEGIN IMMEDIATE')
+  try {
+    let inserted = 0
+    for (const asset of SEED_NEARBY_ASSETS) {
+      if (db.getRecord(asset.id)) continue
+      db.insertRecord({ id: asset.id, entity: 'nearbyAssets', collegeId: asset.collegeId,
+        data: { ...asset }, source: 'seed' })
+      inserted += 1
+    }
+    db.addImportLog({ id: randomUUID(), collegeId: 'clg-bv', actorName: 'System',
+      fileName: `${SEED_PROVENANCE.name} — Illustrative nearby placeholders`, kind: 'seed', mode: 'append',
+      totalImported: inserted, summary: [{ entity: 'nearbyAssets', imported: inserted, skipped: SEED_NEARBY_ASSETS.length - inserted, rejected: 0 }] })
+    db.addAudit({ collegeId: 'clg-bv', actorId: 'system', actorName: 'System', action: 'seed', entity: 'nearbyAssets',
+      entityId: null, detail: `Added ${inserted} Illustrative nearby placeholders under ${SEED_PROVENANCE.name}.`, metadata: null })
+    db.setMeta(key, new Date().toISOString())
+    db.sql.exec('COMMIT')
+  } catch (error) {
+    db.sql.exec('ROLLBACK')
+    throw error
   }
 }
 

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { SeverityBadge } from '../ui/Badge'
 import type { JobCard } from '../../domain/jobs'
+import { api } from '../../lib/api'
 
 interface Props {
   job: JobCard
@@ -196,14 +197,36 @@ export default function JobCardView({
 
       {job.group === 'done' && (
         <div className="mt-3 border-t border-violet/25 pt-3">
-          <p className="font-mono text-[0.625rem] uppercase tracking-widest text-status-ok-dark">
-            Done {job.completedOn ?? 'date not recorded'} (IST)
-          </p>
-          <p className="mt-1 break-words text-sm leading-relaxed text-ivory/75">
-            {job.completionNote ?? 'No completion note was recorded.'}
-          </p>
-          {job.completionPhotoName && (
-            <p className="mt-1 text-xs text-ivory/50">After photo: {job.completionPhotoName}</p>
+          {job.status === 'closed' && !job.repaired ? (
+            <>
+              <p className="font-mono text-[0.625rem] uppercase tracking-widest text-status-error-dark">
+                Closed without repair {job.completedOn ?? 'date not recorded'} (IST)
+              </p>
+              <p className="mt-1 break-words text-sm leading-relaxed text-ivory/75">
+                {job.closedReason ? `Estates reason: ${job.closedReason}` : 'No reason was recorded.'}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-mono text-[0.625rem] uppercase tracking-widest text-status-ok-dark">
+                Done {job.completedOn ?? 'date not recorded'} (IST)
+              </p>
+              <p className="mt-1 break-words text-sm leading-relaxed text-ivory/75">
+                {job.completionNote ?? 'No completion note was recorded.'}
+              </p>
+            </>
+          )}
+          {job.hasCompletionPhoto && (
+            <figure className="mt-2 max-w-xs">
+              <img
+                src={api.complaintPhotoUrl(job.id, 'completion', job.collegeId)}
+                alt={`After photo${job.completionPhotoName ? `: ${job.completionPhotoName}` : ''}`}
+                className="border border-violet/30 object-cover"
+              />
+              <figcaption className="mt-1 font-mono text-[0.5625rem] uppercase tracking-wider text-ivory/40">
+                After photo — {job.completionPhotoName ?? 'unnamed'}
+              </figcaption>
+            </figure>
           )}
         </div>
       )}

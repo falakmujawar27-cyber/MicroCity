@@ -221,7 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const analysis = useMemo(() => {
     if (!workspace) return null
-    return analyseWorkspace(workspace.dataset, workspace.serverTime)
+    return analyseWorkspace(workspace.dataset, workspace.serverTime, workspace.priorityWeights)
   }, [workspace])
 
   const value = useMemo<AuthContextValue>(

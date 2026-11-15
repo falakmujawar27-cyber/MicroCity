@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../../auth/auth-context'
 import { api, ApiError } from '../../lib/api'
 import { COMPLAINT_DESCRIPTION_MIN } from '../../domain/complaint-rules'
-import { COMPLAINT_CATEGORIES } from '../../domain/types'
 import type { Complaint } from '../../domain/types'
 import Notice from '../../components/ui/Notice'
 
@@ -29,7 +28,12 @@ interface Suggestion {
   category: string | null
   roomId: string | null
   roomLabel: string | null
-  raw: string
+  severity: string | null
+}
+
+interface SimilarReports {
+  count: number
+  samples: { ticketNumber: string | null; status: string; raisedAt: string }[]
 }
 
 export default function ReportProblem() {
@@ -43,8 +47,10 @@ export default function ReportProblem() {
   const [photo, setPhoto] = useState<PhotoValue | null>(null)
   const [photoError, setPhotoError] = useState<string | null>(null)
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null)
+  const [similar, setSimilar] = useState<SimilarReports | null>(null)
   const [suggestBusy, setSuggestBusy] = useState(false)
   const [suggestError, setSuggestError] = useState<string | null>(null)
+  const [suggestFallback, setSuggestFallback] = useState(false)
   const [suggestionUsed, setSuggestionUsed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -112,56 +118,37 @@ export default function ReportProblem() {
     reader.readAsDataURL(file)
   }
 
-  const parseSuggestion = (text: string): Suggestion => {
-    const categoryRaw = text.match(/CATEGORY:\s*([^\n]+)/i)?.[1]?.trim() ?? ''
-    const matchedCategory =
-      COMPLAINT_CATEGORIES.find((item) => item.toLowerCase() === categoryRaw.toLowerCase()) ??
-      COMPLAINT_CATEGORIES.find((item) => categoryRaw.toLowerCase().includes(item.toLowerCase())) ??
-      null
-    const roomRaw = text.match(/ROOM:\s*([^\n]+)/i)?.[1]?.trim() ?? ''
-    const wanted = /^none$/i.test(roomRaw) ? null : roomRaw
-    const room =
-      wanted === null
-        ? null
-        : data.rooms.find((item) => item.id.toLowerCase() === wanted.toLowerCase()) ??
-          data.rooms.find((item) => item.code.toLowerCase() === wanted.toLowerCase()) ??
-          data.rooms.find((item) => wanted.toLowerCase().startsWith(item.code.toLowerCase())) ??
-          null
-    return {
-      category: matchedCategory,
-      roomId: room?.id ?? null,
-      roomLabel: room
-        ? `${room.code} — ${room.name ?? 'room'} · ${buildingsById.get(room.buildingId)?.name ?? 'building'}`
-        : null,
-      raw: text,
-    }
-  }
-
   const suggest = async () => {
     setSuggestBusy(true)
     setSuggestError(null)
+    setSuggestFallback(false)
     setSuggestionUsed(false)
+    setSuggestion(null)
+    setSimilar(null)
     try {
-      const answer = await api.aiAssist({
-        task: 'categorise-issue',
-        facts: {
-          description: description.trim(),
-          categories: [...COMPLAINT_CATEGORIES],
-          rooms: data.rooms.map((room) => ({
-            id: room.id,
-            code: room.code,
-            name: room.name,
-            building: buildingsById.get(room.buildingId)?.name ?? null,
-          })),
-        },
-      })
-      if (!answer.ok || !answer.text) {
+      // The server sends only the typed text plus the allowed categories,
+      // rooms and severities, validates the reply against those lists and
+      // computes similar reports itself. The AI never submits the report.
+      const answer = await api.aiAssist({ task: 'categorise-issue', text: description.trim() })
+      if (!answer.ok) {
         setSuggestError(answer.error ?? 'The assistant did not return a suggestion.')
+        setSuggestFallback(true)
         return
       }
-      setSuggestion(parseSuggestion(answer.text))
+      if (answer.accepted === false || !answer.suggestion) {
+        setSuggestError(
+          answer.reason === 'off_list_category'
+            ? 'The suggestion was not on the allowed category list, so it was discarded. Choose a category yourself.'
+            : 'No valid suggestion was returned. Choose a category yourself.',
+        )
+        setSuggestFallback(true)
+        return
+      }
+      setSuggestion(answer.suggestion)
+      setSimilar(answer.similarReports ?? null)
     } catch (err) {
       setSuggestError(err instanceof ApiError ? err.message : 'The assistant could not be reached.')
+      setSuggestFallback(true)
     } finally {
       setSuggestBusy(false)
     }
@@ -510,6 +497,12 @@ export default function ReportProblem() {
               </p>
 
               {suggestError && <p className="mt-2 text-xs text-status-error-dark">{suggestError}</p>}
+              {suggestFallback && (
+                <p className="mt-2 text-xs leading-relaxed text-ivory/70">
+                  <span className="font-semibold">Rule-based explanation:</span> no AI suggestion was used. Review and
+                  choose the category and room yourself; nothing has been submitted.
+                </p>
+              )}
 
               {suggestion && (
                 <div className="mt-3 border-t border-violet/25 pt-3">
@@ -522,7 +515,20 @@ export default function ReportProblem() {
                   <p className="mt-1 text-sm text-ivory">
                     Room: <strong>{suggestion.roomLabel ?? 'No room suggested'}</strong>
                   </p>
-                  <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-ivory/55">{suggestion.raw}</p>
+                  {suggestion.severity && (
+                    <p className="mt-1 text-sm text-ivory">
+                      Suggested severity: <strong>{suggestion.severity}</strong> — a staff member confirms the final severity.
+                    </p>
+                  )}
+                  {similar && similar.count > 0 && (
+                    <p className="mt-2 text-xs leading-relaxed text-ivory/70">
+                      Similar reports already exist: {similar.count} for this room and category
+                      {similar.samples.length > 0 && (
+                        <> (e.g. {similar.samples.map((sample) => sample.ticketNumber ?? 'ticket').join(', ')})</>
+                      )}
+                      . Computed from college records, not by the assistant.
+                    </p>
+                  )}
                   {suggestionUsed ? (
                     <p className="mt-2 text-xs font-semibold text-status-ok-dark">
                       Suggestion applied. Check the answers before submitting.

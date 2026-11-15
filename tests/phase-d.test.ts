@@ -226,7 +226,7 @@ describe('maintenance job board', () => {
     for (const job of active) {
       assert.match(
         job.reason,
-        /^(Critical|High|Medium|Low), \d+ days? open, (about \d+ (person|people) affected|number affected not recorded)$/,
+        /^(Critical|High|Medium|Low), \d+ days? open, (\d+ (person|people) affected \(as reported\)|number affected not recorded)$/,
         `unexpected reason line: ${job.reason}`,
       )
       assert.ok(job.priority, 'an active job carries its triage breakdown')
@@ -629,37 +629,50 @@ describe('phase D carry-over from attendance', () => {
   }
 
   it('refuses a session whose start time has not arrived yet', async () => {
-    const startsAt = new Date(Date.now() + 2 * 60 * 60 * 1000)
-    const endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000)
-    const created = await call<{ record: { id: string } }>(app, '/records/timetableSlots', {
-      method: 'POST',
-      session: admin,
-      body: {
-        data: {
-          roomId: 'rm-bv-101',
-          activity: 'Later today seminar (invented session)',
-          moduleCode: 'SEM999',
-          startsAt: startsAt.toISOString(),
-          endsAt: endsAt.toISOString(),
-          expectedAttendance: 20,
-          attendance: null,
+    const RealDate = globalThis.Date
+    const originalDateDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'Date')!
+    const fixedNow = Date.parse('2026-11-15T05:30:00.000Z')
+    class FrozenDate extends RealDate {
+      constructor(value?: string | number) {
+        super(value ?? fixedNow)
+      }
+
+      static override now(): number {
+        return fixedNow
+      }
+    }
+
+    Object.defineProperty(globalThis, 'Date', { configurable: true, value: FrozenDate })
+    try {
+      const startsAt = new Date(fixedNow + 30 * 60 * 1000)
+      const endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000)
+      const created = await call<{ record: { id: string } }>(app, '/records/timetableSlots', {
+        method: 'POST',
+        session: admin,
+        body: {
+          data: {
+            roomId: 'rm-bv-101',
+            activity: 'Later today seminar (invented session)',
+            moduleCode: 'SEM999',
+            startsAt: startsAt.toISOString(),
+            endsAt: endsAt.toISOString(),
+            expectedAttendance: 20,
+            attendance: null,
+          },
         },
-      },
-    })
-    assert.equal(created.status, 201, JSON.stringify(created.payload))
-    const slotId = created.payload.record.id
-    const sessionDate = istDateKey(startsAt.toISOString())
-    const result = await saveAttendance({ slotId, sessionDate, present: 5, reasons: [] })
-    console.log(
-      'test: attendance refused before the session starts | slot:',
-      slotId,
-      '| starts at:',
-      startsAt.toISOString(),
-      '| HTTP status:',
-      result.status,
-    )
-    assert.equal(result.status, 422)
-    assert.match(String((result.payload as { error?: string }).error), /not started/i)
+      })
+      assert.equal(created.status, 201, JSON.stringify(created.payload))
+      const slotId = created.payload.record.id
+      const sessionDate = istDateKey(startsAt.toISOString())
+      const result = await saveAttendance({ slotId, sessionDate, present: 5, reasons: [] })
+      assert.equal(result.status, 422)
+      assert.equal(
+        (result.payload as { error?: string }).error,
+        'This session has not started yet, so attendance cannot be logged.',
+      )
+    } finally {
+      Object.defineProperty(globalThis, 'Date', originalDateDescriptor)
+    }
   })
 
   it('still accepts a session that started earlier today', async () => {

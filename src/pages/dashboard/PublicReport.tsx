@@ -149,15 +149,15 @@ export default function PublicReport() {
         >
           <span aria-hidden="true">←</span> Home
         </Link>
-        <span className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Shared with all colleges</span>
+        <span className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">College-scoped report</span>
       </div>
 
       <h1 className="mt-4 font-heading text-2xl font-semibold leading-tight text-ivory">
         Report a public issue
       </h1>
       <p className="mt-2 text-sm leading-relaxed text-ivory/65">
-        Street lighting, footways, drains and other public infrastructure near campus. Public reports are shared,
-        so do not include personal details.
+        Street lighting, footways, drains and other public infrastructure near campus. Public reports are visible
+        inside this college only, but do not include personal details.
       </p>
 
       <div className="mt-5">

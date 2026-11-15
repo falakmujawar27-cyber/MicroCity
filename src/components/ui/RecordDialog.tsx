@@ -74,7 +74,7 @@ export default function RecordDialog({
   const [busy, setBusy] = useState(false)
   const [photo, setPhoto] = useState<{ name: string; dataUrl: string } | null>(null)
   const [photoError, setPhotoError] = useState<string | null>(null)
-  const editing = Boolean(initial)
+  const editing = typeof initial?.id === 'string'
 
   useEffect(() => {
     if (!open) return

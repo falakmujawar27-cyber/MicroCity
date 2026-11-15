@@ -318,8 +318,8 @@ export default function DataCentre() {
       {/* Import flow */}
       {!canImport ? (
         <Notice tone="info" title="Read-only for your role" className="mb-8">
-          Importing is limited to administrators and estates staff. You can review where the data came from, the
-          import history and the audit trail, but the file workflow is disabled.
+          Importing is limited to administrators. You can review where the data came from, the import history and
+          the audit trail, but the file workflow is disabled.
         </Notice>
       ) : (
         <Panel

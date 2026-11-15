@@ -18,6 +18,7 @@ export interface JobPriorityDetail {
 
 export interface JobCard {
   id: string
+  collegeId: string
   ticketNumber: string | null
   title: string
   category: string
@@ -38,6 +39,10 @@ export interface JobCard {
   completionNote: string | null
   completionPhotoName: string | null
   hasCompletionPhoto: boolean
+  /** True when the report records a repair, even after it was filed closed. */
+  repaired: boolean
+  /** Present only when estates closed the report without a repair. */
+  closedReason: string | null
   linkedAssetId: string | null
 }
 
@@ -45,6 +50,8 @@ export interface InspectionCard {
   id: string
   assetId: string
   assetName: string
+  /** Null when nobody has been assigned; the screens label it Unassigned. */
+  inspectorName: string | null
   status: 'scheduled' | 'completed' | 'cancelled'
   scheduledFor: string | null
   scheduledOn: string | null

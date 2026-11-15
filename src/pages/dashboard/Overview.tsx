@@ -3,49 +3,34 @@ import { Link } from 'react-router-dom'
 import PageHeading from '../../components/dashboard/PageHeading'
 import Panel from '../../components/ui/Panel'
 import Stat from '../../components/ui/Stat'
-import Notice from '../../components/ui/Notice'
 import Modal from '../../components/ui/Modal'
 import FindingExplainer from '../../components/dashboard/FindingExplainer'
-import { SeverityBadge, StatusBadge, Badge } from '../../components/ui/Badge'
-import ScoreBar from '../../components/ui/ScoreBar'
+import { SeverityBadge, Badge } from '../../components/ui/Badge'
 import { useAuth } from '../../auth/auth-context'
-import { slotsWithoutEnrolledNumber } from '../../domain/analysis'
+import { isCriticalGapItem, slotsWithoutEnrolledNumber } from '../../domain/analysis'
 import type { Finding } from '../../domain/analysis'
-import { formatDate, formatNumber, percentage, titleCase } from '../../lib/format'
+import { formatDateTime, formatNumber, titleCase } from '../../lib/format'
+
+/** The first sentence keeps each priority row to one line of reason. */
+function oneLine(text: string): string {
+  const first = text.split(/(?<=[.!?])\s/)[0] ?? text
+  return first.length > 120 ? `${first.slice(0, 117).trimEnd()}…` : first
+}
+
+function actionFor(finding: Finding): { label: string; to: string } {
+  if (finding.module === 'capacity' || finding.module === 'plan') {
+    return { label: 'Create plan', to: '/dashboard/plan-report' }
+  }
+  return { label: 'Assign', to: '/dashboard/issues-maintenance' }
+}
 
 export default function Overview() {
   const { workspace, analysis, role, session } = useAuth()
   const [explained, setExplained] = useState<Finding | null>(null)
+  const [missingOpen, setMissingOpen] = useState(false)
 
   if (!workspace || !analysis || !role || !session) return null
   const data = workspace.dataset
-  const staff = role === 'admin' || role === 'estates'
-  const maintainer = role === 'maintenance'
-  const personal = role === 'faculty' || role === 'student'
-  const myId = session.user.id
-  const utilisationValues = analysis.capacity.rooms
-    .map((room) => room.averageUtilisation)
-    .filter((value): value is number => value !== null)
-  const averageUtilisation =
-    utilisationValues.length > 0
-      ? utilisationValues.reduce((total, value) => total + value, 0) / utilisationValues.length
-      : null
-
-  const myReports = data.complaints.filter((complaint) => complaint.reporterId === myId)
-  const myOpen = myReports.filter((complaint) => complaint.status === 'open' || complaint.status === 'in_progress')
-  const myAssigned = data.complaints.filter(
-    (complaint) =>
-      complaint.assignedToUserId === myId && (complaint.status === 'open' || complaint.status === 'in_progress'),
-  )
-  const publicOpen = data.urbanIssues.filter((issue) => issue.status === 'reported' || issue.status === 'in_progress')
-
-  const relevantFindings = analysis.findings
-    .filter((finding) => {
-      if (staff) return true
-      if (maintainer) return finding.module === 'maintenance'
-      return false
-    })
-    .slice(0, 6)
 
   const methodsFor = (module: Finding['module']) => {
     if (module === 'capacity') return analysis.capacity.methods
@@ -55,313 +40,242 @@ export default function Overview() {
     return []
   }
 
-  const loop = staff
-    ? [
-        { step: 'Inventory', detail: `${data.buildings.length} buildings · ${data.rooms.length} rooms · ${data.assets.length} assets`, to: '/dashboard/inventory' },
-        { step: 'Needs & gaps', detail: `${analysis.capacity.shortages.length} shortfall slot(s) · ${analysis.capacity.unassessedRooms} room(s) unscored`, to: '/dashboard/needs-gaps' },
-        { step: 'Priority', detail: `${analysis.maintenance.activeCount} active complaint(s) · ${analysis.maintenance.overdueInspectionCount} overdue inspection(s)`, to: '/dashboard/issues-maintenance' },
-        { step: 'Action', detail: `${analysis.plan.options.length} option(s) · ${analysis.plan.approvalCounts.approved} approved`, to: '/dashboard/plan-report' },
-        { step: 'Report', detail: 'Markdown report and CSV findings export', to: '/dashboard/plan-report' },
-      ]
-    : maintainer
-      ? [
-          { step: 'Assigned work', detail: `${myAssigned.length} open item(s) assigned to you`, to: '/dashboard/issues-maintenance' },
-          { step: 'Resources', detail: `${data.utilityMeters.length} meter(s) · ${analysis.utilities.missingCount} missing reading(s)`, to: '/dashboard/resources' },
-          { step: 'Public infrastructure', detail: `${publicOpen.length} open public report(s)`, to: '/dashboard/issues-maintenance' },
-        ]
-      : [
-          { step: 'Report a problem', detail: 'Rooms, fixtures, IT, safety or public infrastructure', to: '/dashboard/issues-maintenance' },
-          { step: 'Track your reports', detail: `${myOpen.length} of your report(s) still open`, to: '/dashboard/issues-maintenance' },
-          { step: 'Public issues', detail: `${publicOpen.length} open report(s) near the college`, to: '/dashboard/issues-maintenance' },
-        ]
+  const criticalGaps = analysis.gaps.filter(isCriticalGapItem).length
+  const openIssues =
+    data.complaints.filter((complaint) => complaint.status === 'open' || complaint.status === 'in_progress').length +
+    data.urbanIssues.filter((issue) => issue.status === 'reported' || issue.status === 'in_progress').length
+  const decisionsWaiting = analysis.plan.approvalCounts.none + analysis.plan.approvalCounts.proposed
+
+  const urgent = analysis.gaps
+    .filter((finding) => finding.severity === 'critical' || finding.severity === 'high')
+    .slice(0, 3)
+
+  const slotsMissingAttendance = data.timetableSlots.filter((slot) => slot.attendance === null)
+  const slotsMissingEnrolled = slotsWithoutEnrolledNumber(data.timetableSlots)
+  const roomsById = new Map(data.rooms.map((room) => [room.id, room]))
+
+  const loop = [
+    {
+      step: 'Inventory',
+      detail: `${formatNumber(data.buildings.length)} buildings`,
+      to: '/dashboard/inventory',
+    },
+    { step: 'Needs', detail: '5 categories', to: '/dashboard/needs-gaps' },
+    {
+      step: 'Priority',
+      detail: `${formatNumber(analysis.maintenance.ranked.length)} ranked`,
+      to: '/dashboard/issues-maintenance',
+    },
+    {
+      step: 'Action',
+      detail: `${formatNumber(data.planOptions.length)} plan · ${formatNumber(decisionsWaiting)} waiting`,
+      to: '/dashboard/plan-report',
+    },
+    { step: 'Report', detail: 'Download', to: '/dashboard/plan-report' },
+  ]
 
   return (
     <div>
       <PageHeading
-        kicker="Workspace overview"
-        title={`${workspace.activeCollege.name}`}
-        description={
-          staff
-            ? 'What the recorded data shows about rooms, utilities and maintenance. Missing values stay missing, never zero.'
-            : maintainer
-              ? 'Your assigned maintenance work, meter readings and public infrastructure reports. Priority scores help decide what to look at first; they are not safety assessments.'
-              : 'Your reports, the public infrastructure register and the rooms visible to students and faculty. Personal reports stay private to you.'
-        }
+        kicker="Module 00 — Overview"
+        title="Overview"
+        description="The three numbers that need attention, the work that should move first, and the loop that turns records into a report."
       />
 
-      {staff && (
-        <div className="mb-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat
-            label="Critical findings"
-            value={analysis.findingCounts.critical}
-            detail={`${analysis.findingCounts.high} high · ${analysis.findingCounts.medium} medium`}
-            tone={analysis.findingCounts.critical > 0 ? 'critical' : 'default'}
-          />
-          <Stat
-            label="Capacity shortfall slots"
-            value={analysis.capacity.shortages.length}
-            detail={`${analysis.capacity.assessedRooms} room(s) scored · ${analysis.capacity.unassessedRooms} not scored`}
-            tone={analysis.capacity.shortages.length > 0 ? 'high' : 'good'}
-          />
-          <Stat
-            label="Active complaints"
-            value={analysis.maintenance.activeCount}
-            detail={`${analysis.maintenance.overdueInspectionCount} inspection(s) overdue`}
-            tone={analysis.maintenance.overdueInspectionCount > 0 ? 'high' : 'default'}
-          />
-          <Stat
-            label="Flagged utility spikes"
-            value={analysis.utilities.spikeCount}
-            detail={`${analysis.utilities.missingCount} missing reading(s) · ${analysis.utilities.resetCount} reset(s)`}
-            tone={analysis.utilities.spikeCount > 0 ? 'high' : 'default'}
-          />
-        </div>
-      )}
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+        <Stat
+          label="Critical gaps"
+          value={formatNumber(criticalGaps)}
+          detail="Campus and nearby gap items; public issues are counted under Open issues."
+          tone={criticalGaps > 0 ? 'critical' : 'default'}
+        />
+        <Stat
+          label="Open issues"
+          value={formatNumber(openIssues)}
+          detail="Campus complaints with status Open or In progress, plus public issues Reported or In progress."
+          tone={openIssues > 0 ? 'high' : 'default'}
+        />
+        <Stat
+          label="Decisions waiting"
+          value={formatNumber(decisionsWaiting)}
+          detail="Plan options with no administrator decision, plus proposals still waiting for one."
+          tone={decisionsWaiting > 0 ? 'high' : 'default'}
+        />
+      </div>
 
-      {maintainer && (
-        <div className="mb-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat
-            label="My open assignments"
-            value={myAssigned.length}
-            detail="Complaints assigned to you in this college"
-            tone={myAssigned.length > 0 ? 'high' : 'good'}
-          />
-          <Stat
-            label="Overdue inspections"
-            value={analysis.maintenance.overdueInspectionCount}
-            detail={`${analysis.maintenance.dueSoonInspectionCount} due within 7 days`}
-            tone={analysis.maintenance.overdueInspectionCount > 0 ? 'critical' : 'default'}
-          />
-          <Stat
-            label="Missing meter readings"
-            value={analysis.utilities.missingCount}
-            detail="Missing values are not treated as zero consumption"
-            tone={analysis.utilities.missingCount > 0 ? 'high' : 'default'}
-          />
-          <Stat
-            label="Open public issues"
-            value={publicOpen.length}
-            detail="Shared register — not owned by a college"
-          />
-        </div>
-      )}
-
-      {personal && (
-        <div className="mb-10 grid gap-4 sm:grid-cols-3">
-          <Stat label="My open reports" value={myOpen.length} detail={`${myReports.length} submitted in total`} tone={myOpen.length > 0 ? 'high' : 'default'} />
-          <Stat label="My resolved reports" value={myReports.filter((c) => c.status === 'resolved' || c.status === 'closed').length} detail="Resolved or closed" tone="good" />
-          <Stat label="Open public issues" value={publicOpen.length} detail="Visible to everyone in the workspace" />
-        </div>
-      )}
-
-      <div className="grid gap-8 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <div className="space-y-8">
-          {staff || maintainer ? (
-            <Panel
-              kicker="What to look at first"
-              title="Priority findings"
-              actions={<Link to="/dashboard/needs-gaps" className="text-xs text-violet-bright underline underline-offset-4 hover:text-gold">Needs &amp; gaps →</Link>}
-            >
-              {relevantFindings.length === 0 ? (
-                <p className="text-sm text-ivory/55">No findings were produced from the current records.</p>
-              ) : (
-                <ul className="divide-y divide-violet/20">
-                  {relevantFindings.map((finding) => (
-                    <li key={finding.id} className="py-3 first:pt-0 last:pb-0">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <SeverityBadge severity={finding.severity} />
-                            <Badge tone="outline">{titleCase(finding.module)}</Badge>
-                          </div>
-                          <p className="mt-1.5 text-sm font-medium text-ivory">{finding.title}</p>
-                          <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-ivory/55">{finding.summary}</p>
-                        </div>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+        <Panel kicker="Priority" title="Fix these first">
+          {urgent.length === 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-ivory/60">No critical or high finding is waiting for action.</p>
+              <Link
+                to="/dashboard/needs-gaps"
+                className="rounded-md border border-violet/40 px-3 py-2 text-sm font-semibold text-ivory/85 hover:bg-violet/15 focus-ring"
+              >
+                Review Needs and Gaps
+              </Link>
+            </div>
+          ) : (
+            <ol className="divide-y divide-violet/20">
+              {urgent.map((finding) => {
+                const nearby = analysis.nearby.find((row) => row.type === finding.facts.nearbyType)
+                const nearbyAsset = nearby?.records.find((asset) => asset.condition === 'poor' || asset.condition === 'fair')
+                const action = nearbyAsset ? {
+                  label: `Report to ${nearbyAsset.responsibleAuthority}`,
+                  to: `/dashboard/issues-maintenance?nearbyAsset=${encodeURIComponent(nearbyAsset.id)}`,
+                } : actionFor(finding)
+                return (
+                  <li key={finding.id} className="flex flex-col items-start gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SeverityBadge severity={finding.severity} />
+                        <span className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">
+                          {nearby ? 'Nearby area' : titleCase(finding.module)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm font-semibold leading-snug text-ivory">{finding.title}</p>
+                      <p className="mt-1 text-sm leading-relaxed text-ivory/60">{oneLine(finding.summary)}</p>
+                      {finding.noPlanYet && <p className="mt-1 text-xs text-ivory/55">No plan yet</p>}
+                    </div>
+                    {/* Stacks under the text at narrow widths (360px) instead of squeezing beside it. */}
+                    <div className="flex max-w-full flex-wrap items-center gap-2">
+                      {nearby ? (
+                        <Link to={`/dashboard/needs-gaps?area=nearby&type=${nearby.type}`} className="rounded-md border border-violet/40 px-3 py-2 text-xs font-semibold text-ivory/85 hover:bg-violet/15 focus-ring">Why?</Link>
+                      ) : (
                         <button
                           type="button"
                           onClick={() => setExplained(finding)}
-                          className="shrink-0 rounded border border-violet/40 px-2.5 py-1 font-mono text-[0.625rem] uppercase tracking-widest text-violet-bright hover:bg-violet/15 focus-ring"
+                          className="rounded-md border border-violet/40 px-3 py-2 text-xs font-semibold text-ivory/85 hover:bg-violet/15 focus-ring"
                         >
-                          How is this calculated?
+                          Why?
                         </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {!staff && (
-                <p className="mt-4 border-t border-violet/20 pt-3 text-xs text-ivory/45">
-                  Maintenance findings use severity, age, repeat history and asset criticality. They are a guide to
-                  what to look at first, not a safety assessment.
-                </p>
-              )}
-            </Panel>
-          ) : (
-            <Panel kicker="Your reports" title="Recent personal reports">
-              {myReports.length === 0 ? (
-                <p className="text-sm text-ivory/55">
-                  You have not submitted a campus report yet. Use Issues &amp; Maintenance to report a problem.
-                </p>
-              ) : (
-                <ul className="divide-y divide-violet/20">
-                  {myReports.slice(0, 5).map((complaint) => (
-                    <li key={complaint.id} className="flex flex-wrap items-start justify-between gap-2 py-3 first:pt-0 last:pb-0">
-                      <div>
-                        <p className="text-sm text-ivory">{complaint.description}</p>
-                        <p className="mt-0.5 text-xs text-ivory/50">
-                          {complaint.category} · raised {formatDate(complaint.raisedAt)}
-                        </p>
-                      </div>
-                      <StatusBadge status={complaint.status} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <Link
-                to="/dashboard/issues-maintenance"
-                className="mt-4 inline-block text-xs text-violet-bright underline underline-offset-4 hover:text-gold"
-              >
-                Open Issues &amp; Maintenance →
-              </Link>
-            </Panel>
+                      )}
+                      <Link
+                        to={action.to}
+                        className="rounded-md bg-violet px-3 py-2 text-xs font-semibold text-ivory hover:bg-violet/85 focus-ring"
+                      >
+                        {action.label}
+                      </Link>
+                    </div>
+                  </li>
+                )
+              })}
+            </ol>
           )}
+        </Panel>
 
-          <Panel kicker="The working loop" title={staff ? 'Evidence to decision' : 'Report, track, plan'}>
-            <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="space-y-6">
+          <Panel kicker="Workflow" title="The loop">
+            <ol className="space-y-2">
               {loop.map((item, index) => (
-                <li key={item.step}>
-                  <Link
-                    to={item.to}
-                    className="block h-full border border-violet/25 bg-ink/50 p-4 transition-colors hover:border-violet/60 hover:bg-violet/10 focus-ring"
-                  >
-                    <span className="font-mono text-[0.625rem] text-gold">{String(index + 1).padStart(2, '0')}</span>
-                    <p className="mt-1 font-heading text-lg text-ivory">{item.step}</p>
-                    <p className="mt-1 text-xs leading-relaxed text-ivory/55">{item.detail}</p>
-                  </Link>
+                <li key={item.step} className="flex items-baseline justify-between gap-3 border-b border-violet/15 pb-2 last:border-b-0 last:pb-0">
+                  <span className="flex min-w-0 items-baseline gap-3">
+                    <span aria-hidden="true" className="font-mono text-[0.625rem] text-gold/70">
+                      {String(index + 1).padStart(2, '0')}
+                    </span>
+                    <Link to={item.to} className="text-sm text-ivory/85 underline decoration-violet/40 underline-offset-2 hover:text-ivory focus-ring">
+                      {item.step}
+                    </Link>
+                  </span>
+                  <span className="shrink-0 text-right text-xs text-ivory/55">{item.detail}</span>
                 </li>
               ))}
             </ol>
           </Panel>
 
-          {staff && (
-            <Panel kicker="Rooms under pressure" title="Latest needs scores">
-              {analysis.capacity.rooms.filter((room) => room.status === 'critical' || room.status === 'stressed').length === 0 ? (
-                <p className="text-sm text-ivory/55">No rooms currently score at stressed or critical.</p>
-              ) : (
-                <ul className="space-y-4">
-                  {analysis.capacity.rooms
-                    .filter((room) => room.status === 'critical' || room.status === 'stressed')
-                    .slice(0, 4)
-                    .map((room) => (
-                      <li key={room.roomId}>
-                        <div className="flex flex-wrap items-baseline justify-between gap-2">
-                          <p className="text-sm text-ivory">
-                            {room.code} — {room.name || room.buildingName}
-                          </p>
-                          <p className="font-mono text-[0.625rem] uppercase tracking-widest text-ivory/45">
-                            peak demand {room.expectedPeak ?? 'not recorded'} · capacity {room.capacity ?? 'not recorded'}
-                          </p>
-                        </div>
-                        <div className="mt-1">
-                          <ScoreBar
-                            value={room.score}
-                            thresholds={[
-                              { at: 30, label: 'Stressed', className: 'bg-gold' },
-                              { at: 60, label: 'Critical', className: 'bg-status-error-dark' },
-                            ]}
-                            compact
-                          />
-                        </div>
-                      </li>
-                    ))}
-                </ul>
-              )}
-            </Panel>
-          )}
-        </div>
-
-        <div className="space-y-8">
-          <Panel kicker="Data quality" title="What the numbers can support">
-            <dl className="space-y-3 text-sm">
-              <div className="flex items-baseline justify-between gap-3 border-b border-violet/15 pb-2">
-                <dt className="text-ivory/60">Rooms without a needs score</dt>
-                <dd className="font-mono text-ivory">{analysis.capacity.unassessedRooms}</dd>
+          <Panel kicker="Evidence quality" title="Missing data">
+            <div className="space-y-3 text-sm leading-relaxed text-ivory/70">
+              <div>
+                <p className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">
+                  Lecture slots with no attendance
+                </p>
+                <p className="mt-1">
+                  <span className="font-semibold text-ivory">{formatNumber(slotsMissingAttendance.length)}</span>{' '}
+                  lecture slots have no attendance.
+                </p>
               </div>
-              <div className="flex items-baseline justify-between gap-3 border-b border-violet/15 pb-2">
-                <dt className="text-ivory/60">Slots with no enrolled number</dt>
-                <dd className="font-mono text-ivory">{formatNumber(slotsWithoutEnrolledNumber(data.timetableSlots))}</dd>
+              <div>
+                <p className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">
+                  Slots with no enrolled number
+                </p>
+                <p className="mt-1">
+                  <span className="font-semibold text-ivory">{formatNumber(slotsMissingEnrolled)}</span>{' '}
+                  slots have no enrolled number.
+                </p>
               </div>
-              <div className="flex items-baseline justify-between gap-3 border-b border-violet/15 pb-2">
-                <dt className="text-ivory/60">Slots missing attendance records</dt>
-                <dd className="font-mono text-ivory">
-                  {analysis.capacity.rooms.reduce((total, room) => total + room.missingAttendanceSlots, 0)}
-                </dd>
-              </div>
-              <div className="flex items-baseline justify-between gap-3 border-b border-violet/15 pb-2">
-                <dt className="text-ivory/60">Utility readings missing a value</dt>
-                <dd className="font-mono text-ivory">{analysis.utilities.missingCount}</dd>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-ivory/60">Average recorded utilisation</dt>
-                <dd className="font-mono text-ivory">{percentage(averageUtilisation, 1)}</dd>
-              </div>
-            </dl>
-            <p className="mt-4 border-t border-violet/20 pt-3 text-xs leading-relaxed text-ivory/45">
-              Utilisation requires both actual attendance and seat capacity. When either is missing it is reported as
-              not available. {formatNumber(slotsWithoutEnrolledNumber(data.timetableSlots))} slots have no enrolled
-              number, so attendance cannot be logged for them yet.{' '}
-              {formatNumber(data.utilityReadings.length)} utility readings and{' '}
-              {formatNumber(data.timetableSlots.length)} timetable slots are in this view.
-            </p>
+              <p className="text-xs text-ivory/45">
+                Utilisation and the Needs status cannot use these sessions until they are filled. Missing is shown as
+                missing, never as zero.
+              </p>
+            </div>
+            {slotsMissingAttendance.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setMissingOpen(true)}
+                className="mt-4 w-full rounded-md border border-violet/40 px-3 py-2 text-sm font-semibold text-ivory/85 hover:bg-violet/15 focus-ring"
+              >
+                Ask faculty to log
+              </button>
+            ) : (
+              <p className="mt-4 border-t border-violet/20 pt-3 text-xs text-ivory/45">
+                Every recorded lecture slot has attendance.
+              </p>
+            )}
           </Panel>
-
-          {staff && (
-            <Panel kicker="Data source" title="Where this data came from">
-              <p className="text-sm leading-relaxed text-ivory/70">{workspace.provenance.notes}</p>
-              <dl className="mt-4 space-y-2 font-mono text-[0.6875rem] text-ivory/50">
-                <div className="flex justify-between gap-3">
-                  <dt>Dataset</dt>
-                  <dd className="text-right text-ivory/80">{workspace.provenance.name}</dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt>Generated</dt>
-                  <dd className="text-right text-ivory/80">{formatDate(workspace.provenance.generatedAt)}</dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt>Generator</dt>
-                  <dd className="text-right text-ivory/80">{workspace.provenance.generator}</dd>
-                </div>
-              </dl>
-              <Link to="/dashboard/data-centre" className="mt-4 inline-block text-xs text-violet-bright underline underline-offset-4 hover:text-gold">
-                Open Data Centre →
-              </Link>
-            </Panel>
-          )}
-
-          {personal && (
-            <Notice tone="info" title="Privacy">
-              Your campus reports are visible only to you and to the staff who resolve them. Public infrastructure
-              reports are shared with all signed-in users. Rooms and buildings are read-only for your role.
-            </Notice>
-          )}
-
-          {maintainer && (
-            <Notice tone="info" title="Your scope">
-              You only see complaints assigned to you, the meter readings for this college and the shared public
-              register. Ask estates if work is missing from your queue.
-            </Notice>
-          )}
         </div>
       </div>
 
       <Modal
         open={Boolean(explained)}
         onClose={() => setExplained(null)}
-        title="How this is calculated"
-        description="The records and rules behind this finding, what they cannot tell you, and an optional written summary."
+        title="Why this is on the list"
+        description="The recorded evidence, the rules used, and what the finding cannot tell you."
         size="lg"
       >
         {explained && <FindingExplainer finding={explained} methods={methodsFor(explained.module)} />}
+      </Modal>
+
+      <Modal
+        open={missingOpen}
+        onClose={() => setMissingOpen(false)}
+        title="Slots with no attendance"
+        description="Read-only list. MicroCity does not send messages or notifications; share this list with faculty yourself."
+        size="lg"
+      >
+        {slotsMissingAttendance.length === 0 ? (
+          <p className="text-sm text-ivory/60">No lecture slot is missing attendance.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[34rem] text-left text-sm">
+              <thead className="border-b border-violet/30 font-mono text-[0.625rem] uppercase tracking-widest text-violet-bright">
+                <tr>
+                  <th scope="col" className="px-3 py-2 font-medium">Session</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Room</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Starts (IST)</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Enrolled</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-violet/20">
+                {slotsMissingAttendance.map((slot) => (
+                  <tr key={slot.id}>
+                    <td className="px-3 py-2 text-ivory/85">{slot.activity}</td>
+                    <td className="px-3 py-2 text-ivory/70">
+                      {roomsById.get(slot.roomId)?.code ?? 'Room not recorded'}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-ivory/60">{formatDateTime(slot.startsAt)}</td>
+                    <td className="px-3 py-2 font-mono text-ivory/70">
+                      {slot.expectedAttendance === null ? (
+                        <Badge tone="warn">Not enrolled</Badge>
+                      ) : (
+                        formatNumber(slot.expectedAttendance)
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Modal>
     </div>
   )

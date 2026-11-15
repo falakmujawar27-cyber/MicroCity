@@ -184,6 +184,9 @@ export default function MaintenanceJobs() {
                   ? `${Math.abs(dueInspection.days ?? 0)} days overdue`
                   : `due in ${dueInspection.days ?? 0} days`}
               </p>
+              <p className="mt-1 text-xs text-ivory/50">
+                Inspector: {dueInspection.inspectorName ?? 'Unassigned'}
+              </p>
               <div className="mt-3">
                 <InspectionForm inspection={dueInspection} collegeId={collegeId} onSaved={() => void reload()} />
               </div>
@@ -205,7 +208,7 @@ export default function MaintenanceJobs() {
       <Modal
         open={Boolean(details)}
         title="Why this job is here"
-        description="These are the recorded points behind the one-line reason. The same score orders the staff lists."
+        description="These are the recorded points behind the one-line reason. The same priority points order the staff lists."
         onClose={() => setDetails(null)}
         size="md"
       >
@@ -215,7 +218,7 @@ export default function MaintenanceJobs() {
             {details.priority && (
               <>
                 <p className="mt-4 font-mono text-[0.6875rem] uppercase tracking-widest text-gold">
-                  Triage score {details.priority.score} · {details.priority.bandLabel}
+                  Priority points {details.priority.score} · {details.priority.bandLabel}
                 </p>
                 <ul className="mt-2 divide-y divide-violet/20 border-y border-violet/25">
                   {details.priority.components.map((component) => (
@@ -231,8 +234,12 @@ export default function MaintenanceJobs() {
                   ))}
                 </ul>
                 <p className="mt-3 text-xs leading-relaxed text-ivory/45">
-                  A triage score helps order the work. It is not a safety assessment or a promise of how long a repair
+                  Priority points help order the work. They are not a safety assessment or a promise of how long a repair
                   takes.
+                </p>
+                <p className="mt-2 text-xs leading-relaxed text-ivory/45">
+                  People affected is the number the reporter entered, not an estimate. Repeat counts include every
+                  report in this college, but you only ever see your own jobs.
                 </p>
               </>
             )}

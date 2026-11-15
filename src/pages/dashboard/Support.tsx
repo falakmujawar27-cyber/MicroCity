@@ -36,12 +36,12 @@ export default function Support() {
             'Report a campus problem in three short steps.',
             'Follow every report you made under My reports.',
             'Log attendance for a timetable session and add a quick reason when something affected the class.',
-            'Report a public issue near campus; it is shared with every college.',
+            'Report a public issue near campus; it is visible inside this college.',
           ]
         : [
             'Report a campus problem in three short steps.',
             'Follow every report you made under My reports.',
-            'Report a public issue near campus; it is shared with every college.',
+            'Report a public issue near campus; it is visible inside this college.',
           ]
 
     return (
@@ -109,7 +109,7 @@ export default function Support() {
           <Panel kicker="Optional assistant" title="How AI is used">
             <Notice tone="info">
               The optional assistant may suggest a category and room for a report when it is configured. It never
-              submits the report, and any AI text is labelled “AI-generated — please verify”.
+              submits the report, and any AI text is labelled “AI-generated, please verify”.
             </Notice>
             <p className="mt-4 text-xs leading-relaxed text-ivory/55">
               Reporting works without AI. If AI is not configured, the suggestion button is not shown and nothing is
@@ -215,7 +215,7 @@ export default function Support() {
         <Panel kicker="Optional assistant" title="How AI is used">
           <Notice tone="info">
             The optional assistant explains numbers the server has already calculated. It never calculates,
-            approves, assigns or deletes anything, and any AI text is labelled “AI-generated — please verify”.
+            approves, assigns or deletes anything, and any AI text is labelled “AI-generated, please verify”.
           </Notice>
           <p className="mt-4 text-xs leading-relaxed text-ivory/55">
             All calculations and rule-based explanations work without AI. If AI is not configured, nothing is sent

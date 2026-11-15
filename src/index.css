@@ -309,3 +309,36 @@ a:hover { text-decoration: none; }
   border: 0;
   white-space: nowrap;
 }
+
+/* Print-friendly report: only the white report sheet is printed. */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  html,
+  body {
+    background: #ffffff !important;
+  }
+  body:has(.print-sheet) *:not(:has(.print-sheet)):not(.print-sheet):not(.print-sheet *) {
+    display: none !important;
+  }
+  body:has(.print-sheet) *:has(.print-sheet) {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: white !important;
+  }
+  .print-sheet {
+    width: 100%;
+    margin: 0 !important;
+    border: 0 !important;
+    padding: 0 !important;
+  }
+  .print-sheet tr {
+    break-inside: avoid;
+  }
+}

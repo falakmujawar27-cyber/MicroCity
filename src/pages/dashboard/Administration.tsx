@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import PageHeading from '../../components/dashboard/PageHeading'
 import Panel from '../../components/ui/Panel'
@@ -20,6 +20,8 @@ const CAPABILITIES: { key: Capability; label: string; description: string }[] = 
   { key: 'view-resources', label: 'View resources', description: 'Electricity and water readings, trends and anomalies' },
   { key: 'view-plan', label: 'View plan', description: 'Plan options, costs, decisions and reports' },
   { key: 'approve-decisions', label: 'Approve decisions', description: 'Record approved / rejected / deferred plan decisions' },
+  { key: 'manage-thresholds', label: 'Manage thresholds', description: 'Enter category limits with a required source; every change is audited' },
+  { key: 'manage-priority-weights', label: 'Manage priority weights', description: 'Change the maintenance priority weights; every change is audited' },
   { key: 'manage-urban-assets', label: 'Manage public assets', description: 'Create/delete shared public infrastructure assets' },
   { key: 'update-urban-issues', label: 'Update public issues', description: 'Change status and notes on public infrastructure issues' },
   { key: 'import-data', label: 'Import data', description: 'Validate and apply CSV/Excel imports' },
@@ -33,6 +35,7 @@ export default function Administration() {
   const [savingMember, setSavingMember] = useState<string | null>(null)
   const [memberError, setMemberError] = useState<string | null>(null)
   const [memberSaved, setMemberSaved] = useState<string | null>(null)
+  const [aiSettings, setAiSettings] = useState<Awaited<ReturnType<typeof api.adminAiSettings>> | null>(null)
   const [staff, setStaff] = useState({
     displayName: '',
     username: '',
@@ -43,9 +46,25 @@ export default function Administration() {
   const [staffError, setStaffError] = useState<string | null>(null)
   const [staffSaved, setStaffSaved] = useState<string | null>(null)
 
-  if (!workspace || !session) return null
-
+  // Admin-only AI usage counts (calls today, rejections). Never the key.
   const canManageUsers = can('manage-users')
+  useEffect(() => {
+    if (!canManageUsers) return
+    let cancelled = false
+    api
+      .adminAiSettings()
+      .then((settings) => {
+        if (!cancelled) setAiSettings(settings)
+      })
+      .catch(() => {
+        if (!cancelled) setAiSettings(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [canManageUsers])
+
+  if (!workspace || !session) return null
 
   const saveRole = async (userId: string) => {
     const nextRole = roleEdits[userId]
@@ -254,30 +273,27 @@ export default function Administration() {
               available without it.
             </Notice>
           ) : ai.configured ? (
-            <Notice tone="success" title="Configured on the server">
-              The assistant is enabled with model <span className="font-mono text-ivory/85">{ai.model ?? 'unknown'}</span>.
-              Requests are proxied by the server; the API key is never sent to the browser.
+            <Notice tone="success" title="Configured">
+              Model: <span className="font-mono text-ivory/85">{ai.model ?? 'unknown'}</span>.
             </Notice>
           ) : (
             <Notice tone="info" title="Not configured">
-              No AI credentials are configured on the server. Every calculation, finding, priority and report is
-              still produced without AI. Rule-based explanations are labelled as such.
+              Model: not available.
             </Notice>
           )}
-          <div className="mt-4 space-y-3 text-sm text-ivory/70">
-            <p>
-              Configuration uses server-side environment variables:{' '}
-              <span className="font-mono text-ivory/85">AI_BASE_URL</span>,{' '}
-              <span className="font-mono text-ivory/85">AI_API_KEY</span>,{' '}
-              <span className="font-mono text-ivory/85">AI_MODEL</span> and optional{' '}
-              <span className="font-mono text-ivory/85">AI_API_URL</span>. No key is present in client code or
-              browser storage.
-            </p>
-            <p className="border-t border-violet/25 pt-3 text-xs leading-relaxed text-ivory/55">
-              AI output is always labelled “AI-generated — please verify”. The assistant explains supplied figures;
-              it cannot create, approve, assign, delete or authorise anything.
-            </p>
-          </div>
+          {canManageUsers && aiSettings && (
+            <div className="mt-4 space-y-2 border-t border-violet/25 pt-3 text-sm text-ivory/70">
+              <div className="flex flex-wrap gap-x-6 gap-y-1">
+                <span>
+                  Calls today: <strong className="text-ivory">{aiSettings.callsToday}</strong>
+                </span>
+                <span>
+                  Rejected answers today: <strong className="text-ivory">{aiSettings.rejectedToday}</strong>
+                </span>
+              </div>
+              <p className="text-xs leading-relaxed text-ivory/55">{aiSettings.dataNote}</p>
+            </div>
+          )}
         </Panel>
       </div>
 

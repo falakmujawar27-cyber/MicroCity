@@ -47,6 +47,7 @@ const PREFIX: Record<string, string> = {
   tariffs: 'trf',
   complaints: 'cmp',
   planOptions: 'opt',
+  nearbyAssets: 'near',
   urbanAssets: 'ua',
   urbanIssues: 'ui',
 }
@@ -54,7 +55,7 @@ const PREFIX: Record<string, string> = {
 const SEVERITY = ['low', 'medium', 'high', 'critical']
 
 export function canCreate(entity: string, ctx: ValidationContext): boolean {
-  if (entity === 'urbanAssets') return ctx.actor.role === 'admin'
+  if (entity === 'urbanAssets' || entity === 'nearbyAssets') return ctx.actor.role === 'admin'
   if (entity === 'urbanIssues' || entity === 'complaints') return true
   return hasCapability(ctx.actor.role, 'manage-inventory')
 }
@@ -72,12 +73,12 @@ export function canUpdate(record: StoredRecord, ctx: ValidationContext): boolean
     return String(record.data.inspectorUserId ?? '') === ctx.actor.id
   }
   if (entity === 'urbanIssues') return hasCapability(ctx.actor.role, 'update-urban-issues')
-  if (entity === 'urbanAssets') return ctx.actor.role === 'admin'
+  if (entity === 'urbanAssets' || entity === 'nearbyAssets') return ctx.actor.role === 'admin'
   return hasCapability(ctx.actor.role, 'manage-inventory')
 }
 
 export function canDelete(record: StoredRecord, ctx: ValidationContext): boolean {
-  if (record.entity === 'complaints' || record.entity === 'urbanAssets' || record.entity === 'urbanIssues') {
+  if (record.entity === 'complaints' || record.entity === 'urbanAssets' || record.entity === 'urbanIssues' || record.entity === 'nearbyAssets') {
     return ctx.actor.role === 'admin'
   }
   return hasCapability(ctx.actor.role, 'manage-inventory')
@@ -323,6 +324,7 @@ export function createEntityRecord(
     raw.status = 'reported'
     raw.reportedAt = at
   }
+  if (entity === 'nearbyAssets' && raw.distanceBasis == null) raw.distanceBasis = 'estimated'
   const errors: Record<string, string> = {}
   if (entity === 'complaints') {
     if (raw.buildingId === undefined || raw.buildingId === null || String(raw.buildingId).trim() === '') {
@@ -414,6 +416,7 @@ export function createEntityRecord(
     if (data.utility === 'water' && data.unit !== 'm3') {
       fail(errors, 'unit', 'Water meters should use m3.')
     }
+    data.measurementType = data.measurementType === 'estimated' ? 'estimated' : 'measured'
   }
 
   if (entity === 'utilityReadings') {
@@ -460,6 +463,11 @@ export function createEntityRecord(
     }
   }
 
+  if (entity === 'nearbyAssets' && data.dailyUsers === null) data.usersMethod = null
+  if (entity === 'nearbyAssets' && data.dailyUsers !== null && !data.usersMethod) {
+    fail(errors, 'usersMethod', 'Explain how daily users were obtained when a number is entered.')
+  }
+
   if (entity === 'urbanAssets') {
     data.name = data.name ?? null
     data.locationLabel = data.locationLabel ?? null
@@ -467,6 +475,7 @@ export function createEntityRecord(
   }
 
   if (entity === 'urbanIssues') {
+    data.reporterCollegeId = ctx.collegeId
     data.reporterId = ctx.actor.id
     data.reportedAt = ctx.mode === 'import' && data.reportedAt ? data.reportedAt : at
     data.status = ctx.mode === 'import' && data.status ? data.status : 'reported'
@@ -557,8 +566,45 @@ export function updateEntityRecord(
           }
         }
       }
-      data.status = to
-      data.resolvedAt = to === 'resolved' || to === 'closed' ? new Date().toISOString() : null
+      const note = typeof patch.note === 'string' ? patch.note.trim() : ''
+      if (to === 'closed' && from === 'resolved') {
+        // The job was already fixed; closing now only files the ticket. The
+        // repair outcome stays Fixed and the resolution time is retained.
+        data.status = to
+        data.closedAt = new Date().toISOString()
+        data.closedReason = null
+      } else if (to === 'closed') {
+        // Closing without a repair is a distinct outcome from Fixed, so it
+        // must carry the reason estates is giving the reporter.
+        if (note.length < 10) {
+          return {
+            ok: false,
+            error: 'Say why this report is being closed without a repair, at least 10 characters.',
+            fieldErrors: { note: 'Say why this report is being closed without a repair, at least 10 characters.' },
+          }
+        }
+        data.status = to
+        data.resolvedAt = null
+        data.closedAt = new Date().toISOString()
+        data.closedReason = note
+      } else {
+        if (
+          to === 'resolved' &&
+          ctx.actor.role !== 'maintenance' &&
+          note.length < 10
+        ) {
+          return {
+            ok: false,
+            error: 'Write what was done, at least 10 characters, before marking this report Fixed.',
+            fieldErrors: { note: 'Write what was done, at least 10 characters.' },
+          }
+        }
+        data.status = to
+        data.resolvedAt = to === 'resolved' ? new Date().toISOString() : null
+        data.closedAt = null
+        data.closedReason = null
+        if (to === 'resolved' && note) data.completionNote = note
+      }
     }
     if (patch.assignedToUserId !== undefined) {
       if (ctx.actor.role === 'maintenance') {
@@ -668,11 +714,20 @@ export function updateEntityRecord(
     for (const field of spec.fields) {
       if (patch[field.key] !== undefined) data[field.key] = patch[field.key]
     }
-    if (entity === 'buildings' || entity === 'rooms' || entity === 'assets' || entity === 'utilityMeters' || entity === 'utilityReadings' || entity === 'tariffs' || entity === 'planOptions' || entity === 'urbanAssets') {
+    if (entity === 'buildings' || entity === 'rooms' || entity === 'assets' || entity === 'utilityMeters' || entity === 'utilityReadings' || entity === 'tariffs' || entity === 'planOptions' || entity === 'urbanAssets' || entity === 'nearbyAssets') {
       // Re-run the same field normalisers so partial edits cannot inject bad types.
       const normalised = normaliseGeneric(spec, data, errors)
       Object.assign(data, normalised)
     }
+  }
+
+  if (entity === 'nearbyAssets') {
+    data.id = existing.id
+    data.collegeId = existing.collegeId
+    if (data.dailyUsers === null) data.usersMethod = null
+  }
+  if (entity === 'nearbyAssets' && data.dailyUsers !== null && !data.usersMethod) {
+    errors.usersMethod = 'Explain how daily users were obtained when a number is entered.'
   }
 
   if (Object.keys(errors).length === 0) {

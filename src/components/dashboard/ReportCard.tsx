@@ -1,6 +1,7 @@
 import { StatusBadge } from '../ui/Badge'
 import type { Building, Complaint, Room } from '../../domain/types'
-import { REPORT_STEPS, reportStage, reportTitle } from '../../domain/progress'
+import { REPORT_STEPS, reportStage, reportSteps, reportTitle, wasRepaired } from '../../domain/progress'
+import { api } from '../../lib/api'
 
 export { reportStage }
 
@@ -26,19 +27,39 @@ export function reportPlace(
   return building ?? 'Place not recorded'
 }
 
-export function ReportProgress({ stage }: { stage: number }) {
+export function ReportProgress({
+  stage,
+  steps = REPORT_STEPS,
+  closed = false,
+}: {
+  stage: number
+  steps?: readonly string[]
+  closed?: boolean
+}) {
   return (
-    <div className="mt-4" aria-label={`Progress: ${REPORT_STEPS[stage]} of ${REPORT_STEPS[REPORT_STEPS.length - 1]}`}>
+    <div className="mt-4" aria-label={`Progress: ${steps[stage]} of ${steps[steps.length - 1]}`}>
       <div className="grid grid-cols-4 gap-1">
-        {REPORT_STEPS.map((step, index) => (
+        {steps.map((step, index) => (
           <div key={step} className="min-w-0">
             <div
-              className={`h-1 rounded-full ${index <= stage ? 'bg-violet' : 'bg-ivory/20'}`}
+              className={`h-1 rounded-full ${
+                index < stage
+                  ? 'bg-violet'
+                  : index === stage
+                    ? closed
+                      ? 'bg-status-error-dark'
+                      : 'bg-violet'
+                    : 'bg-ivory/20'
+              }`}
               aria-hidden="true"
             />
             <p
               className={`mt-1 break-words text-center text-[0.5625rem] uppercase leading-tight tracking-wide ${
-                index === stage ? 'font-bold text-ivory' : 'text-ivory/50'
+                index === stage
+                  ? closed
+                    ? 'font-bold text-status-error-dark'
+                    : 'font-bold text-ivory'
+                  : 'text-ivory/50'
               }`}
             >
               {step}
@@ -60,6 +81,9 @@ export function ReportCard({
   now: string
 }) {
   const ticket = complaint.ticketNumber ?? complaint.id
+  const closed = complaint.status === 'closed'
+  const repaired = wasRepaired(complaint)
+  const closedWithoutRepair = closed && !repaired
   return (
     <article className="border border-violet/30 bg-obsidian p-4">
       <div className="flex items-start justify-between gap-3">
@@ -74,7 +98,33 @@ export function ReportCard({
       <p className="mt-2 font-mono text-[0.625rem] uppercase tracking-wider text-ivory/45">
         {ticket} · {reportAge(complaint.raisedAt, now)}
       </p>
-      <ReportProgress stage={reportStage(complaint)} />
+      <ReportProgress stage={reportStage(complaint)} steps={reportSteps(complaint)} closed={closedWithoutRepair} />
+      {closedWithoutRepair && (
+        <div className="mt-3 border-l-2 border-status-error-dark pl-3">
+          <p className="text-sm font-semibold text-status-error-dark">Closed without repair</p>
+          <p className="mt-0.5 break-words text-sm text-ivory/75">
+            {complaint.closedReason ? `Reason given: ${complaint.closedReason}` : 'No reason was recorded.'}
+          </p>
+        </div>
+      )}
+      {(complaint.status === 'resolved' || (closed && repaired)) && complaint.completionNote && (
+        <p className="mt-3 border-l-2 border-status-ok-dark pl-3 text-sm leading-relaxed text-ivory/75">
+          <span className="font-semibold text-status-ok-dark">What was done: </span>
+          {complaint.completionNote}
+        </p>
+      )}
+      {complaint.hasCompletionPhoto && (
+        <figure className="mt-3 max-w-xs">
+          <img
+            src={api.complaintPhotoUrl(complaint.id, 'completion', complaint.collegeId)}
+            alt={`After photo${complaint.completionPhotoName ? `: ${complaint.completionPhotoName}` : ''}`}
+            className="border border-violet/30 object-cover"
+          />
+          <figcaption className="mt-1 font-mono text-[0.5625rem] uppercase tracking-wider text-ivory/40">
+            After photo — the repair team
+          </figcaption>
+        </figure>
+      )}
     </article>
   )
 }

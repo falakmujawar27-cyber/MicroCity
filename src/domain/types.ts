@@ -15,6 +15,12 @@ export type Severity = 'low' | 'medium' | 'high' | 'critical'
 export type AssetCondition = 'good' | 'fair' | 'poor'
 export type UtilityType = 'electricity' | 'water'
 export type ReadingType = 'cumulative' | 'interval'
+/**
+ * How a meter's numbers are obtained. Estimated readings cannot support a
+ * leak prompt because an estimation step could itself produce the spike.
+ * Older and imported meters without the field are treated as measured.
+ */
+export type MeasurementType = 'measured' | 'estimated'
 export type ComplaintStatus = 'open' | 'in_progress' | 'resolved' | 'closed'
 export type ComplaintRoomChoice = 'room' | 'not_sure'
 export type UrbanIssueStatus = 'reported' | 'in_progress' | 'resolved' | 'closed'
@@ -125,6 +131,8 @@ export interface UtilityMeter {
   unit: string
   readingType: ReadingType
   label: string
+  /** Missing on older or imported records; treated as measured. */
+  measurementType?: MeasurementType
 }
 
 export interface UtilityReading {
@@ -202,11 +210,17 @@ export interface Complaint {
   assignedToName?: string | null
   peopleAffected: number | null
   photoName: string | null
-  photoDataUrl: string | null
+  /** Photo bytes are never listed; fetch them from the authenticated photo endpoint. */
+  photoDataUrl?: string | null
+  hasPhoto?: boolean
   /** Written by the maintenance technician when a job is marked done. */
   completionNote?: string | null
   completionPhotoName?: string | null
   completionPhotoDataUrl?: string | null
+  hasCompletionPhoto?: boolean
+  /** Written by estates when a report is closed without a repair. */
+  closedReason?: string | null
+  closedAt?: string | null
 }
 
 export interface ComplaintUpdate {
@@ -222,6 +236,31 @@ export interface ComplaintUpdate {
   toStatus: ComplaintStatus | null
 }
 
+export const NEARBY_TYPE_LABELS = {
+  streetlight: 'Streetlight',
+  footpath: 'Footpath section',
+  transport_stop: 'Bus stop or auto stand',
+  drinking_water: 'Drinking water point',
+  drain_waste: 'Drain or waste point',
+} as const
+
+export type NearbyAssetType = keyof typeof NEARBY_TYPE_LABELS
+export type EvidenceBasis = 'measured' | 'estimated' | 'illustrative'
+
+export interface NearbyAsset {
+  id: string
+  collegeId: string
+  type: NearbyAssetType
+  locationDescription: string
+  distanceMetres: number
+  distanceBasis: 'measured' | 'estimated'
+  condition: AssetCondition | null
+  dailyUsers: number | null
+  usersMethod: string | null
+  responsibleAuthority: string
+  basis: EvidenceBasis
+}
+
 export interface UrbanAsset {
   id: string
   category: UrbanAssetCategory
@@ -233,7 +272,7 @@ export interface UrbanAsset {
 export interface UrbanIssue {
   id: string
   urbanAssetId: string | null
-  reporterId: string
+  reporterId: string | null
   reporterName?: string
   category: string
   severity: Severity
@@ -307,6 +346,7 @@ export interface DatasetSources {
   complaintUpdates: ComplaintUpdate[]
   planOptions: PlanOption[]
   decisions: Decision[]
+  nearbyAssets: NearbyAsset[]
   urbanAssets: UrbanAsset[]
   urbanIssues: UrbanIssue[]
 }
@@ -389,7 +429,58 @@ export interface WorkspacePayload {
   imports: ImportLogEntry[]
   audit: AuditEntry[]
   members: UserSummary[]
+  /** Administrator-entered limits. Read-only for every other role. */
+  needsLimits: NeedsLimitConfig[]
+  priorityWeights: PriorityWeights
   serverTime: string
+}
+
+export type ThresholdKind = 'published_norm' | 'project_assumption'
+
+export const THRESHOLD_KIND_LABELS: Record<ThresholdKind, string> = {
+  published_norm: 'Published norm',
+  project_assumption: 'Project assumption',
+}
+
+/**
+ * A limit is only accepted for a category whose rule consumes it. The source
+ * is mandatory: MicroCity never presents an unsourced number as a norm.
+ */
+export interface NeedsLimitConfig {
+  category: string
+  limit: number
+  unit: string
+  source: string
+  kind: ThresholdKind
+  updatedAt: string
+  updatedByName: string
+}
+
+/**
+ * Points added by the maintenance priority rule. Defaults preserve the
+ * documented Phase D scoring; administrators may change them and every change
+ * is audited with the previous and new values.
+ */
+export interface PriorityWeights {
+  /** Points for a critical complaint; high/medium/low scale proportionally. */
+  severity: number
+  /** Points when a linked asset is in poor condition. */
+  condition: number
+  /** Points per 10 people affected (still capped at 15). */
+  usersAffected: number
+  /** Points per 3 days open (still capped at 15). */
+  daysOpen: number
+  updatedAt: string | null
+  updatedByName: string | null
+}
+
+export const DEFAULT_PRIORITY_WEIGHTS: PriorityWeights = {
+  severity: 40,
+  condition: 4,
+  usersAffected: 1,
+  daysOpen: 1,
+  updatedAt: null,
+  updatedByName: null,
 }
 
 export interface RegisterInput {

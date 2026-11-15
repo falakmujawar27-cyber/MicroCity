@@ -1,386 +1,578 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import NearbyNeeds from '../../components/dashboard/NearbyNeeds'
+import FindingExplainer from '../../components/dashboard/FindingExplainer'
 import PageHeading from '../../components/dashboard/PageHeading'
 import Panel from '../../components/ui/Panel'
-import Stat from '../../components/ui/Stat'
-import { Badge } from '../../components/ui/Badge'
-import ScoreBar from '../../components/ui/ScoreBar'
+import { Badge, StatusBadge } from '../../components/ui/Badge'
 import Modal from '../../components/ui/Modal'
-import FindingExplainer from '../../components/dashboard/FindingExplainer'
+import Notice from '../../components/ui/Notice'
 import { EmptyPanel } from '../../components/ui/PageState'
+import { api, ApiError } from '../../lib/api'
 import { useAuth } from '../../auth/auth-context'
-import { formatDateTime, percentage, titleCase } from '../../lib/format'
-import { NEEDS_THRESHOLDS, NEEDS_WEIGHTS } from '../../domain/analysis'
-import type { Finding, RoomNeedsProfile } from '../../domain/analysis'
-import { ATTENDANCE_REASONS, ATTENDANCE_REASON_LABELS } from '../../domain/types'
-import type { AttendanceReason } from '../../domain/types'
+import { formatCurrency, formatDate, formatDateTime } from '../../lib/format'
+import {
+  buildNeedsCategories,
+  NEEDS_THRESHOLDS,
+  NEEDS_STATUS_LABELS,
+} from '../../domain/analysis'
+import type {
+  NeedsCategoryKey,
+  NeedsCategoryRow,
+  NeedsCategoryStatus,
+  OptionAnalysis,
+} from '../../domain/analysis'
+import type { ThresholdKind } from '../../domain/types'
+import { THRESHOLD_KIND_LABELS } from '../../domain/types'
 
-const STATUS_TONE = {
+const STATUS_TONE: Record<NeedsCategoryStatus, 'error' | 'warn' | 'ok' | 'neutral'> = {
   critical: 'error',
   stressed: 'warn',
   adequate: 'ok',
-  unavailable: 'neutral',
-} as const
+  not_enough_data: 'neutral',
+}
 
-const STATUS_ICON = {
+const STATUS_ICON: Record<NeedsCategoryStatus, string> = {
   critical: '▲',
   stressed: '◆',
   adequate: '●',
-  unavailable: '?',
-} as const
+  not_enough_data: '?',
+}
 
-function NeedsStatusBadge({ status }: { status: RoomNeedsProfile['status'] }) {
+function CategoryStatusBadge({ row }: { row: NeedsCategoryRow }) {
   return (
-    <Badge tone={STATUS_TONE[status]}>
-      <span aria-hidden="true" className="text-[0.6875rem] leading-none">{STATUS_ICON[status]}</span>
-      {titleCase(status)}
+    <Badge tone={STATUS_TONE[row.status]}>
+      <span aria-hidden="true" className="text-[0.6875rem] leading-none">{STATUS_ICON[row.status]}</span>
+      {row.statusLabel}
     </Badge>
   )
 }
 
+function optionEffect(option: OptionAnalysis): string {
+  if (option.seatEffect !== null) {
+    return `+${option.seatEffect} seat${option.seatEffect === 1 ? '' : 's'} of headroom${option.seatEffectComplete ? '' : ' (partial evidence)'}`
+  }
+  return option.description || 'Not entered'
+}
+
 export default function NeedsGaps() {
-  const { analysis, workspace } = useAuth()
-  const [explained, setExplained] = useState<Finding | null>(null)
-  const [statusFilter, setStatusFilter] = useState<'all' | RoomNeedsProfile['status']>('all')
+  const { analysis, workspace, role, refresh } = useAuth()
+  const [searchParams] = useSearchParams()
+  const [area, setArea] = useState<'campus' | 'nearby'>(searchParams.get('area') === 'nearby' ? 'nearby' : 'campus')
+  const [selectedKey, setSelectedKey] = useState<NeedsCategoryKey>('rooms')
+  const [methodOpen, setMethodOpen] = useState(false)
+  const [busyOption, setBusyOption] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [limitDraft, setLimitDraft] = useState<{
+    limit: string
+    unit: string
+    source: string
+    kind: ThresholdKind
+  }>({ limit: '', unit: 'm3', source: '', kind: 'project_assumption' })
+  const [limitBusy, setLimitBusy] = useState(false)
+  const [limitError, setLimitError] = useState<string | null>(null)
+  const [limitSaved, setLimitSaved] = useState<string | null>(null)
+
+  const waterLimit = workspace?.needsLimits?.find((limit) => limit.category === 'water') ?? null
+
+  useEffect(() => {
+    if (!waterLimit) return
+    setLimitDraft({
+      limit: String(waterLimit.limit),
+      unit: waterLimit.unit,
+      source: waterLimit.source,
+      kind: waterLimit.kind,
+    })
+  }, [waterLimit?.updatedAt])
+
+  const categories = useMemo(() => {
+    if (!analysis || !workspace) return []
+    return buildNeedsCategories(
+      workspace.dataset,
+      analysis.capacity,
+      analysis.utilities,
+      analysis.findings,
+      workspace.needsLimits ?? [],
+    )
+  }, [analysis, workspace])
 
   if (!analysis || !workspace) return null
-  const capacity = analysis.capacity
-  const rooms = capacity.rooms.filter((room) => statusFilter === 'all' || room.status === statusFilter)
 
-  const slotRoomIds = new Map(workspace.dataset.timetableSlots.map((slot) => [slot.id, slot.roomId]))
-  const feedbackByRoom = new Map<string, Record<AttendanceReason, number>>()
-  for (const record of workspace.dataset.attendanceRecords) {
-    const roomId = slotRoomIds.get(record.slotId)
-    if (!roomId || record.reasons.length === 0) continue
-    const counts = feedbackByRoom.get(roomId) ?? { room_too_small: 0, too_hot: 0, projector_not_working: 0 }
-    for (const reason of record.reasons) counts[reason] += 1
-    feedbackByRoom.set(roomId, counts)
+  const selected = categories.find((row) => row.key === selectedKey) ?? categories[0]
+  const gapOptions = analysis.plan.options.filter((option) =>
+    selected.findingIds.includes(option.addressesFinding),
+  )
+  const selectedFinding = analysis.findings.find((finding) => finding.id === selected.findingIds[0])
+  const shownOptions = gapOptions.slice(0, 2)
+  const gapLabel =
+    selected.key === 'rooms' && selected.facts.roomCode
+      ? `Room ${selected.facts.roomCode}`
+      : selected.label
+  const decisions = workspace.dataset.decisions
+    .filter((decision) => gapOptions.some((option) => option.optionId === decision.optionId))
+    .sort((a, b) => (b.decidedAt ?? b.createdAt).localeCompare(a.decidedAt ?? a.createdAt))
+  const optionTitle = (optionId: string) =>
+    gapOptions.find((option) => option.optionId === optionId)?.title ?? 'Option no longer recorded'
+
+  async function approve(option: OptionAnalysis) {
+    setError(null)
+    setBusyOption(option.optionId)
+    try {
+      let decisionId = option.decision?.decisionId ?? null
+      if (!decisionId) {
+        const created = await api.createDecision({
+          optionId: option.optionId,
+          title: option.title,
+          notes: 'Recorded from Needs and Gaps.',
+        })
+        decisionId = created.record.id
+      }
+      await api.updateDecision(decisionId, { status: 'approved' })
+      await refresh()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'The approval could not be recorded.')
+    } finally {
+      setBusyOption(null)
+    }
+  }
+
+  async function propose(option: OptionAnalysis) {
+    setError(null)
+    setBusyOption(option.optionId)
+    try {
+      await api.createDecision({
+        optionId: option.optionId,
+        title: option.title,
+        notes: 'Proposed from Needs and Gaps. An administrator must record the decision.',
+      })
+      await refresh()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'The proposal could not be recorded.')
+    } finally {
+      setBusyOption(null)
+    }
+  }
+
+  async function saveLimit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setLimitBusy(true)
+    setLimitError(null)
+    setLimitSaved(null)
+    try {
+      await api.saveNeedsLimit('water', {
+        limit: Number(limitDraft.limit),
+        unit: limitDraft.unit.trim(),
+        source: limitDraft.source.trim(),
+        kind: limitDraft.kind,
+      })
+      await refresh()
+      setLimitSaved('The Water limit and its source were saved. The Water row now compares the latest known month with it.')
+    } catch (err) {
+      setLimitError(err instanceof ApiError ? err.message : 'The limit could not be saved.')
+    } finally {
+      setLimitBusy(false)
+    }
   }
 
   return (
     <div>
       <PageHeading
-        kicker="Module 02 — Needs & Gaps"
-        title="Capacity against recorded demand"
-        description="Room shortages, timetable clashes and pressure scores based on booked demand and recorded attendance. Utilisation is only shown when both attendance and seat capacity are recorded."
+        kicker="Module 02 — Needs and Gaps"
+        title="Needs and Gaps"
+        description="Campus demand against capacity, or nearby infrastructure condition. Missing evidence is shown as Not enough data, never assumed Adequate."
       />
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat
-          label="Rooms scored"
-          value={capacity.assessedRooms}
-          detail={`${capacity.unassessedRooms} room(s) cannot be scored — records missing`}
-          tone={capacity.statusCounts.critical > 0 ? 'high' : 'default'}
-        />
-        <Stat
-          label="Critical rooms"
-          value={capacity.statusCounts.critical}
-          detail={`${capacity.statusCounts.stressed} stressed · ${capacity.statusCounts.adequate} adequate`}
-          tone={capacity.statusCounts.critical > 0 ? 'critical' : 'default'}
-        />
-        <Stat
-          label="Shortfall slots"
-          value={capacity.shortages.length}
-          detail="Bookings whose expected attendance exceeds seat capacity"
-          tone={capacity.shortages.length > 0 ? 'high' : 'good'}
-        />
-        <Stat
-          label="Timetable overlaps"
-          value={capacity.overlaps.length}
-          detail="Same room booked at overlapping times"
-          tone={capacity.overlaps.length > 0 ? 'high' : 'default'}
-        />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-ivory/45">
+          Statuses and thresholds are rule-based; optional AI only explains the recorded finding below.
+        </p>
+        <div className="inline-flex border border-violet/40" role="group" aria-label="Area">
+          {(['campus', 'nearby'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={area === value}
+              onClick={() => setArea(value)}
+              className={`px-4 py-1.5 font-mono text-[0.6875rem] uppercase tracking-widest focus-ring ${
+                area === value
+                  ? 'bg-violet text-ivory'
+                  : 'text-ivory/60 hover:bg-violet/15'
+              }`}
+            >
+              {value === 'campus' ? 'Campus' : 'Nearby area'}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="grid gap-8 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-        <div className="min-w-0 space-y-8">
-          <Panel
-            kicker="Room assessments"
-            title="Needs scores"
-            actions={
-              <label className="flex items-center gap-2 font-mono text-[0.625rem] uppercase tracking-widest text-ivory/50">
-                Status
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-                  className="rounded border border-violet/40 bg-ink px-2 py-1 text-xs text-ivory focus-ring"
+      {area === 'nearby' ? (
+        <NearbyNeeds initialType={searchParams.get('type')} />
+      ) : (
+        <div className="space-y-8">
+          <Panel kicker="Five categories" title="Demand vs capacity">
+            <div className="overflow-x-auto">
+              <table className="block w-full border-collapse text-left sm:table">
+                <caption className="sr-only">Needs categories with demand against capacity and status</caption>
+                <thead className="hidden sm:table-header-group">
+                  <tr className="border-b border-violet/30">
+                    <th className="py-2 pr-3 font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Category</th>
+                    <th className="py-2 pr-3 font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Demand vs capacity</th>
+                    <th className="py-2 text-right font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="block sm:table-row-group">
+                  {categories.map((row) => (
+                    <tr
+                      key={row.key}
+                      className={`flex flex-wrap items-center gap-x-3 border-b border-violet/15 py-3 align-top last:border-0 sm:table-row sm:py-0 ${
+                        row.key === selected.key ? 'bg-violet/10' : ''
+                      }`}
+                    >
+                      <td className="order-1 py-0 pr-0 align-top sm:table-cell sm:py-3 sm:pr-3">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedKey(row.key)}
+                          aria-pressed={row.key === selected.key}
+                          className={`text-left text-sm hover:text-violet-bright focus-ring ${
+                            row.key === selected.key ? 'font-semibold text-ivory' : 'text-ivory/75'
+                          }`}
+                        >
+                          {row.label}
+                        </button>
+                      </td>
+                      <td className="order-3 w-full pt-1 text-sm text-ivory/70 sm:table-cell sm:w-auto sm:py-3 sm:pr-3 sm:pt-3 sm:align-top">
+                        <p>{row.demand}</p>
+                        {row.key === 'rooms' && (
+                          <p className="mt-0.5 text-xs text-ivory/45">
+                            Status decided by Needs Score {row.facts.decidingScore ?? 'not scored'} of 100 ·{' '}
+                            {row.facts.sessionsUsed} of {row.facts.sessionsTotal} sessions recorded · average present{' '}
+                            {row.facts.averagePresent ?? 'not recorded'} per session (not summed)
+                          </p>
+                        )}
+                      </td>
+                      <td className="order-2 ml-auto py-0 align-top sm:table-cell sm:py-3 sm:text-right">
+                        <CategoryStatusBadge row={row} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+
+          <Panel kicker="Thresholds and sources" title="The limit used for Water">
+            <p className="text-sm leading-relaxed text-ivory/70">
+              Only Water has a rule in this build that takes a limit: each water meter&rsquo;s latest known month is
+              compared with one recorded monthly limit. The limit is a quantity in the meter&rsquo;s unit (m3 here),
+              not a percentage. Rooms use the Needs Score bands (a project assumption); Lighting, Waste and Parking
+              have no rule that takes a limit, so no limit field is offered for them.
+            </p>
+            {!waterLimit ? (
+              <p className="mt-3 text-sm leading-relaxed text-ivory/70">
+                No Water limit is recorded, so the Water row is <strong className="text-ivory">Not enough data</strong>.
+                No default is applied.
+              </p>
+            ) : (
+              <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Limit</dt>
+                  <dd className="text-ivory">
+                    {waterLimit.limit} {waterLimit.unit} per meter per month
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Type</dt>
+                  <dd className="text-ivory">{THRESHOLD_KIND_LABELS[waterLimit.kind]}</dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Source</dt>
+                  <dd className="text-ivory">{waterLimit.source}</dd>
+                </div>
+                <div className="sm:col-span-2 text-xs text-ivory/45">
+                  Recorded by {waterLimit.updatedByName} on {formatDate(waterLimit.updatedAt)}.
+                </div>
+              </dl>
+            )}
+
+            {role === 'admin' ? (
+              <form onSubmit={(event) => void saveLimit(event)} className="mt-4 border-t border-violet/15 pt-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <label className="block text-xs text-ivory/70">
+                    Limit
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      required
+                      value={limitDraft.limit}
+                      onChange={(event) => setLimitDraft((current) => ({ ...current, limit: event.target.value }))}
+                      className="mt-1 min-h-11 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
+                    />
+                  </label>
+                  <label className="block text-xs text-ivory/70">
+                    Unit
+                    <input
+                      required
+                      maxLength={24}
+                      value={limitDraft.unit}
+                      onChange={(event) => setLimitDraft((current) => ({ ...current, unit: event.target.value }))}
+                      className="mt-1 min-h-11 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
+                    />
+                  </label>
+                  <label className="block text-xs text-ivory/70 sm:col-span-2">
+                    Source (required)
+                    <input
+                      required
+                      maxLength={200}
+                      value={limitDraft.source}
+                      placeholder="For example: college water policy 2026, section 4"
+                      onChange={(event) => setLimitDraft((current) => ({ ...current, source: event.target.value }))}
+                      className="mt-1 min-h-11 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
+                    />
+                  </label>
+                  <label className="block text-xs text-ivory/70 sm:col-span-2">
+                    Type
+                    <select
+                      value={limitDraft.kind}
+                      onChange={(event) =>
+                        setLimitDraft((current) => ({ ...current, kind: event.target.value as ThresholdKind }))
+                      }
+                      className="mt-1 min-h-11 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
+                    >
+                      <option value="project_assumption">{THRESHOLD_KIND_LABELS.project_assumption}</option>
+                      <option value="published_norm">{THRESHOLD_KIND_LABELS.published_norm}</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    type="submit"
+                    disabled={limitBusy}
+                    className="rounded-md bg-violet px-4 py-2 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {limitBusy ? 'Saving…' : 'Save limit and source'}
+                  </button>
+                  <span className="text-xs text-ivory/45">
+                    Administrators only. Estates can see the saved limit but cannot change it. Every change is audited
+                    with the old and new value.
+                  </span>
+                </div>
+                {limitError && <Notice tone="danger" className="mt-3">{limitError}</Notice>}
+                {limitSaved && <Notice tone="success" className="mt-3">{limitSaved}</Notice>}
+              </form>
+            ) : (
+              <p className="mt-4 border-t border-violet/15 pt-3 text-xs leading-relaxed text-ivory/45">
+                Read-only: only an administrator can record or change the limit, its unit, type or source. The saved
+                value above is used by the Water row.
+              </p>
+            )}
+          </Panel>
+
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,2fr)]">
+            <Panel kicker="Rule-based explanation" title={`Why is ${selected.label} ${NEEDS_STATUS_LABELS[selected.status].toLowerCase()}?`}>
+              <ul className="space-y-2 text-sm leading-relaxed text-ivory/75">
+                {selected.why.slice(0, 3).map((line, index) => (
+                  <li key={index}>{line}</li>
+                ))}
+              </ul>
+              <p className="mt-3 text-xs leading-relaxed text-ivory/45">
+                {selected.findingIds.length > 0
+                  ? `Finding feeding this row: ${
+                      analysis.findings.find((finding) => finding.id === selected.findingIds[0])?.title ??
+                      selected.findingIds[0]
+                    }${selected.findingIds.length > 1 ? ` and ${selected.findingIds.length - 1} more` : ''}.`
+                  : 'No computed finding feeds this row.'}
+              </p>
+              {selectedFinding && <FindingExplainer finding={selectedFinding} compact />}
+              <button
+                type="button"
+                onClick={() => setMethodOpen(true)}
+                className="mt-3 text-sm font-semibold text-violet-bright underline underline-offset-4 hover:text-ivory focus-ring"
+              >
+                How is this calculated?
+              </button>
+              <p className="mt-2 text-[0.6875rem] text-ivory/40">
+                Rule-based explanation — not AI. Room thresholds are a project assumption (not a published norm).
+                {waterLimit
+                  ? ` Water limit: ${waterLimit.limit} ${waterLimit.unit} per meter per month (${THRESHOLD_KIND_LABELS[waterLimit.kind]}; source: ${waterLimit.source}).`
+                  : ' No Water limit is recorded, so Water shows Not enough data and no ratio is calculated.'}{' '}
+                Lighting, Waste and Parking have no rule that takes a limit.
+              </p>
+            </Panel>
+
+            <Panel
+              kicker="Options"
+              title={`Choose an option for ${gapLabel}`}
+              actions={
+                gapOptions.length > 0 ? (
+                  <Link
+                    to="/dashboard/plan-report"
+                    className="font-mono text-[0.625rem] uppercase tracking-widest text-violet-bright hover:text-ivory focus-ring"
+                  >
+                    Plan and Report
+                  </Link>
+                ) : undefined
+              }
+            >
+              <Notice tone="warning" className="mb-4">
+                Cost is what someone entered on the option. “Cost: not entered” means no figure is recorded; MicroCity
+                does not estimate it.
+              </Notice>
+              {shownOptions.length === 0 ? (
+                <EmptyPanel title="No option is recorded for this gap">
+                  <p>No plan option targets the findings feeding {selected.label.toLowerCase()}.</p>
+                  <Link
+                    to="/dashboard/plan-report"
+                    className="mt-3 inline-block rounded border border-violet/50 px-3 py-1.5 text-sm text-violet-bright hover:bg-violet/15 focus-ring"
+                  >
+                    Open Plan and Report
+                  </Link>
+                </EmptyPanel>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {shownOptions.map((option) => (
+                    <article key={option.optionId} className="flex flex-col border border-violet/30 bg-ink/40 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-heading text-lg text-ivory">{option.title}</h3>
+                        {option.approvalState !== 'none' && <StatusBadge status={option.approvalState} />}
+                      </div>
+                      <dl className="mt-3 space-y-2 text-sm leading-relaxed">
+                        <div>
+                          <dt className="sr-only">Cost</dt>
+                          <dd className="text-ivory/70">
+                            Cost:{' '}
+                            <span className="text-ivory">
+                              {option.capitalCost === null
+                                ? 'not entered'
+                                : formatCurrency(option.capitalCost, 'INR')}
+                            </span>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="sr-only">Effect</dt>
+                          <dd className="text-ivory/70">Effect: <span className="text-ivory">{optionEffect(option)}</span></dd>
+                        </div>
+                        <div>
+                          <dt className="sr-only">Assumption</dt>
+                          <dd className="text-ivory/70">
+                            Assumption: <span className="text-ivory">{option.assumptions || 'None recorded'}</span>
+                          </dd>
+                        </div>
+                      </dl>
+                      <div className="mt-auto pt-4">
+                        {role === 'admin' ? (
+                          <button
+                            type="button"
+                            onClick={() => void approve(option)}
+                            disabled={busyOption === option.optionId || option.approvalState === 'approved'}
+                            className="w-full rounded-md bg-violet px-4 py-2 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {option.approvalState === 'approved'
+                              ? 'Approved'
+                              : busyOption === option.optionId
+                                ? 'Approving…'
+                                : 'Approve'}
+                          </button>
+                        ) : role === 'estates' ? (
+                          <button
+                            type="button"
+                            onClick={() => void propose(option)}
+                            disabled={
+                              busyOption === option.optionId ||
+                              option.approvalState === 'proposed' ||
+                              option.approvalState === 'approved'
+                            }
+                            className="w-full rounded-md border border-violet/50 px-4 py-2 text-sm font-semibold text-violet-bright hover:bg-violet/15 focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {option.approvalState === 'approved'
+                              ? 'Approved'
+                              : option.approvalState === 'proposed'
+                                ? 'Proposed'
+                                : busyOption === option.optionId
+                                  ? 'Proposing…'
+                                  : 'Propose'}
+                          </button>
+                        ) : (
+                          <p className="text-xs italic text-ivory/45">Your role cannot approve or propose here.</p>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+              {gapOptions.length > shownOptions.length && (
+                <p className="mt-3 text-xs text-ivory/45">
+                  Showing the first two recorded options. The rest are on Plan and Report.
+                </p>
+              )}
+              {error && <Notice tone="danger" className="mt-4">{error}</Notice>}
+            </Panel>
+          </div>
+
+          <Panel kicker="Decision log" title={`Decisions for ${gapLabel}`}>
+            {decisions.length === 0 ? (
+              <EmptyPanel title="No decision is recorded for this gap">
+                <p>A proposal must be recorded before an administrator can approve, reject or defer it.</p>
+                <Link
+                  to="/dashboard/plan-report"
+                  className="mt-3 inline-block rounded border border-violet/50 px-3 py-1.5 text-sm text-violet-bright hover:bg-violet/15 focus-ring"
                 >
-                  <option value="all">All</option>
-                  <option value="critical">Critical</option>
-                  <option value="stressed">Stressed</option>
-                  <option value="adequate">Adequate</option>
-                  <option value="unavailable">Unavailable</option>
-                </select>
-              </label>
-            }
-          >
-            {rooms.length === 0 ? (
-              <EmptyPanel title="No rooms match this filter">
-                {capacity.rooms.length === 0
-                  ? 'No rooms are recorded for this college yet.'
-                  : 'Choose another status to see other rooms.'}
+                  Open Plan and Report
+                </Link>
               </EmptyPanel>
             ) : (
-              <div className="space-y-4">
-                {rooms.map((room) => (
-                  <article key={room.roomId} className="border border-violet/25 bg-ink/40 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-heading text-lg text-ivory">
-                            {room.code}{room.name ? ` — ${room.name}` : ''}
-                          </h3>
-                          <NeedsStatusBadge status={room.status} />
-                          {room.provisional && <Badge tone="outline">Provisional</Badge>}
-                        </div>
-                        <p className="mt-0.5 text-xs text-ivory/50">{room.buildingName}</p>
-                      </div>
-                      <div className="w-full max-w-[220px]">
-                        <ScoreBar
-                          value={room.score}
-                          label="Needs score"
-                          thresholds={[
-                            { at: NEEDS_THRESHOLDS.stressed, label: 'Stressed', className: 'bg-gold' },
-                            { at: NEEDS_THRESHOLDS.critical, label: 'Critical', className: 'bg-status-error-dark' },
-                          ]}
-                          compact
-                        />
-                      </div>
-                    </div>
-
-                    <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
-                      <div>
-                        <dt className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">Capacity</dt>
-                        <dd className="mt-0.5 text-sm text-ivory">{room.capacity === null ? 'Not recorded' : room.capacity}</dd>
-                      </div>
-                      <div>
-                        <dt className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">Peak demand</dt>
-                        <dd className="mt-0.5 text-sm text-ivory">{room.expectedPeak === null ? 'Not recorded' : room.expectedPeak}</dd>
-                      </div>
-                      <div>
-                        <dt className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">Shortfall slots</dt>
-                        <dd className="mt-0.5 text-sm text-ivory">{room.shortageSlots} of {room.comparableSlots}</dd>
-                      </div>
-                      <div>
-                        <dt className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">Utilisation</dt>
-                        <dd className="mt-0.5 text-sm text-ivory">
-                          {room.averageUtilisation === null ? (
-                            <span className="italic text-ivory/40">Not recorded</span>
-                          ) : (
-                            percentage(room.averageUtilisation, 1)
-                          )}
-                        </dd>
-                      </div>
-                    </dl>
-
-                    <details className="group mt-3 border-t border-violet/20 pt-2">
-                      <summary className="cursor-pointer select-none font-mono text-[0.625rem] uppercase tracking-widest text-violet-bright focus-ring">
-                        Score breakdown &amp; bookings
-                      </summary>
-                      <div className="mt-3 grid gap-4 lg:grid-cols-2">
-                        <div className="min-w-0">
-                          <p className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">Components</p>
-                          <ul className="mt-1.5 space-y-1.5 text-xs">
-                            {room.components.map((component) => (
-                              <li key={component.key} className="flex items-start justify-between gap-3">
-                                <span className="text-ivory/65">
-                                  {component.label}
-                                  <span className="block text-[0.625rem] text-ivory/40">{component.detail}</span>
-                                </span>
-                                <span className={`shrink-0 font-mono ${component.available ? 'text-ivory' : 'text-ivory/35'}`}>
-                                  {component.available ? `${component.points} / ${component.maxPoints}` : 'n/a'}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                          {room.missingInputs.length > 0 && (
-                            <div className="mt-3 border-t border-violet/20 pt-2">
-                              <p className="font-mono text-[0.5625rem] uppercase tracking-widest text-gold">Missing inputs</p>
-                              <ul className="mt-1 space-y-0.5 text-xs text-ivory/55">
-                                {room.missingInputs.map((input, index) => <li key={index}>— {input}</li>)}
-                              </ul>
-                            </div>
-                          )}
-                          <div className="mt-3 border-t border-violet/20 pt-2">
-                            <p className="font-mono text-[0.5625rem] uppercase tracking-widest text-gold">Attendance feedback</p>
-                            {feedbackByRoom.has(room.roomId) ? (
-                              <ul className="mt-1 space-y-0.5 text-xs text-ivory/55">
-                                {ATTENDANCE_REASONS.map((reason) => {
-                                  const count = feedbackByRoom.get(room.roomId)?.[reason] ?? 0
-                                  return count > 0 ? (
-                                    <li key={reason}>
-                                      — {ATTENDANCE_REASON_LABELS[reason]}: {count} session{count === 1 ? '' : 's'}
-                                    </li>
-                                  ) : null
-                                })}
-                              </ul>
-                            ) : (
-                              <p className="mt-1 text-xs italic text-ivory/45">
-                                No quick reasons recorded from attendance.
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">Bookings</p>
-                          {room.slots.length === 0 ? (
-                            <p className="mt-1.5 text-xs italic text-ivory/45">No timetable bookings recorded for this room.</p>
-                          ) : (
-                            <div className="mt-1.5 overflow-x-auto">
-                              <table className="w-full min-w-[380px] border-collapse text-xs">
-                                <thead><tr className="border-b border-violet/20 text-left font-mono text-[0.5625rem] uppercase tracking-widest text-gold/70">
-                                  <th className="py-1 pr-2">Activity</th><th className="py-1 pr-2">Starts</th><th className="py-1 pr-2">Exp.</th><th className="py-1 pr-2">Att.</th><th className="py-1">Shortfall</th>
-                                </tr></thead>
-                                <tbody>
-                                  {room.slots.map((slot) => (
-                                    <tr key={slot.slotId} className="border-b border-violet/10 last:border-0">
-                                      <td className="py-1 pr-2 text-ivory/70">{slot.activity}</td>
-                                      <td className="py-1 pr-2 text-ivory/55">{formatDateTime(slot.startsAt)}</td>
-                                      <td className="py-1 pr-2 text-ivory/70">{slot.expectedAttendance ?? '—'}</td>
-                                      <td className="py-1 pr-2 text-ivory/70">{slot.attendance ?? '—'}</td>
-                                      <td className={`py-1 font-mono ${slot.shortageSeats ? 'text-status-error-dark' : 'text-ivory/40'}`}>
-                                        {slot.shortageSeats ?? '—'}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <p className="mt-3 border-t border-violet/15 pt-2 text-[0.6875rem] leading-relaxed text-ivory/40">{room.method}</p>
-                    </details>
-                  </article>
-                ))}
-              </div>
-            )}
-          </Panel>
-
-          <Panel kicker="Slot by slot" title="Capacity shortfalls">
-            {capacity.shortages.length === 0 ? (
-              <p className="text-sm text-ivory/55">No booking currently has expected attendance above its room capacity.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[820px] border-collapse">
-                  <thead><tr className="border-b border-violet/30 text-left">
-                    <th className="px-3 py-2 font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Room</th>
-                    <th className="px-3 py-2 font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Activity</th>
-                    <th className="px-3 py-2 font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Starts</th>
-                    <th className="px-3 py-2 font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Expected</th>
-                    <th className="px-3 py-2 font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Capacity</th>
-                    <th className="px-3 py-2 font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Shortfall</th>
-                    <th className="px-3 py-2 font-mono text-[0.625rem] uppercase tracking-widest text-gold/80">Observed utilisation</th>
-                  </tr></thead>
-                  <tbody>
-                    {capacity.shortages.map((shortage) => (
-                      <tr key={shortage.slotId} className="border-b border-violet/15 last:border-0">
-                        <td className="px-3 py-2.5 text-sm text-ivory">{shortage.roomCode}</td>
-                        <td className="px-3 py-2.5 text-sm text-ivory/70">{shortage.activity}</td>
-                        <td className="px-3 py-2.5 text-sm text-ivory/60">{formatDateTime(shortage.startsAt)}</td>
-                        <td className="px-3 py-2.5 text-sm text-ivory/80">{shortage.expectedAttendance}</td>
-                        <td className="px-3 py-2.5 text-sm text-ivory/80">{shortage.capacity}</td>
-                        <td className="px-3 py-2.5 font-mono text-sm text-status-error-dark">+{shortage.shortageSeats}</td>
-                        <td className="px-3 py-2.5 text-sm text-ivory/60">
-                          {shortage.observedUtilisation === null ? <span className="italic text-ivory/40">No attendance recorded</span> : percentage(shortage.observedUtilisation, 1)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Panel>
-
-          {capacity.overlaps.length > 0 && (
-            <Panel kicker="Room booking integrity" title="Timetable overlaps">
               <ul className="divide-y divide-violet/20">
-                {capacity.overlaps.map((overlap) => (
-                  <li key={overlap.id} className="py-2.5 text-sm text-ivory/70 first:pt-0 last:pb-0">
-                    <span className="text-ivory">{overlap.roomCode}</span> — {overlap.minutes} minutes between
-                    “{overlap.a.activity}” and “{overlap.b.activity}”.
-                    <span className="mt-0.5 block text-xs text-ivory/45">
-                      {formatDateTime(overlap.a.startsAt)} – {formatDateTime(overlap.a.endsAt)} and{' '}
-                      {formatDateTime(overlap.b.startsAt)} – {formatDateTime(overlap.b.endsAt)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </Panel>
-          )}
-        </div>
-
-        <div className="min-w-0 space-y-8">
-          <Panel kicker="Findings" title="Capacity findings">
-            {capacity.findings.length === 0 ? (
-              <p className="text-sm text-ivory/55">No capacity findings were produced.</p>
-            ) : (
-              <ul className="divide-y divide-violet/20">
-                {capacity.findings.map((finding) => (
-                  <li key={finding.id} className="py-3 first:pt-0 last:pb-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <Badge tone={finding.severity === 'critical' ? 'error' : finding.severity === 'high' ? 'warn' : 'outline'}>
-                          {titleCase(finding.severity)}
-                        </Badge>
-                        <p className="mt-1.5 text-sm text-ivory">{finding.title}</p>
-                        <p className="mt-0.5 text-xs leading-relaxed text-ivory/50">{finding.summary}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setExplained(finding)}
-                        className="shrink-0 rounded border border-violet/40 px-2 py-1 font-mono text-[0.5625rem] uppercase tracking-widest text-violet-bright hover:bg-violet/15 focus-ring"
-                      >
-                        How is this calculated?
-                      </button>
+                {decisions.map((decision) => (
+                  <li key={decision.id} className="py-3 first:pt-0 last:pb-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge status={decision.status} />
+                      <span className="text-xs text-ivory/45">{optionTitle(decision.optionId)}</span>
                     </div>
+                    <p className="mt-1.5 text-sm text-ivory">{decision.title}</p>
+                    <p className="mt-0.5 text-xs text-ivory/55">
+                      Owner: {decision.ownerName ?? 'not assigned'} ·{' '}
+                      {decision.decidedAt
+                        ? `${decision.status === 'approved' ? 'Approved' : decision.status === 'rejected' ? 'Rejected' : 'Deferred'} by ${
+                            decision.decidedByName ?? 'an administrator'
+                          } on ${formatDateTime(decision.decidedAt)}`
+                        : `Proposed ${formatDateTime(decision.createdAt)}`}
+                    </p>
                   </li>
                 ))}
               </ul>
             )}
-          </Panel>
-
-          <Panel kicker="Method" title="How the score is built">
-            <p className="text-sm leading-relaxed text-ivory/65">
-              The Needs Score is a fixed 100-point additive score. A component that cannot be calculated is marked
-              unavailable and is not scored as zero.
-            </p>
-            <dl className="mt-4 space-y-2 text-sm">
-              {Object.entries(NEEDS_WEIGHTS).map(([key, max]) => (
-                <div key={key} className="flex items-baseline justify-between gap-3 border-b border-violet/15 pb-1.5 last:border-0">
-                  <dt className="text-ivory/65">{titleCase(key)}</dt>
-                  <dd className="font-mono text-ivory/80">max {max}</dd>
-                </div>
-              ))}
-            </dl>
-            <p className="mt-4 border-t border-violet/20 pt-3 text-xs leading-relaxed text-ivory/45">
-              Bands: {NEEDS_THRESHOLDS.critical}+ critical, {NEEDS_THRESHOLDS.stressed}–{NEEDS_THRESHOLDS.critical - 1} stressed,
-              below {NEEDS_THRESHOLDS.stressed} adequate. Utilisation is only calculated when both attendance and seat
-              capacity are recorded; otherwise it is unavailable, not zero.
-            </p>
-            <details className="mt-4 border-t border-violet/20 pt-3">
-              <summary className="cursor-pointer font-mono text-[0.625rem] uppercase tracking-widest text-violet-bright">How is this calculated?</summary>
-              <ul className="mt-2 space-y-2 text-xs leading-relaxed text-ivory/50">
-                {capacity.methods.map((method, index) => <li key={index}>• {method}</li>)}
-              </ul>
-            </details>
-          </Panel>
-
-          <Panel kicker="What is missing" title="What the records cannot show">
-            <p className="text-sm leading-relaxed text-ivory/65">
-              This view uses {workspace.dataset.timetableSlots.length} timetable slot(s) and{' '}
-              {workspace.dataset.complaints.length} complaint record(s) visible to your role.
-            </p>
-            <p className="mt-3 text-xs leading-relaxed text-ivory/45">
-              Without expected attendance, a booking cannot add to capacity demand. Without actual attendance,
-              utilisation cannot be measured. Rooms missing capacity or attendance records are listed as unavailable,
-              not scored as zero.
+            <p className="mt-3 border-t border-violet/15 pt-3 text-xs leading-relaxed text-ivory/45">
+              Only an administrator can approve, reject or defer. Every status change records who and when on the
+              server.
             </p>
           </Panel>
         </div>
-      </div>
+      )}
 
-      <Modal open={Boolean(explained)} onClose={() => setExplained(null)} title="How this is calculated" description="The records and rules behind this finding, what they cannot tell you, and an optional written summary." size="lg">
-        {explained && <FindingExplainer finding={explained} methods={capacity.methods} />}
+      <Modal
+        open={methodOpen}
+        onClose={() => setMethodOpen(false)}
+        title={`How ${selected.label} is calculated`}
+        description="The recorded figures and rules behind this row. No AI text is used."
+        size="lg"
+      >
+        <div className="border border-violet/40 bg-ink/60 p-4">
+          <p className="flex items-center gap-2 font-mono text-[0.625rem] uppercase tracking-widest text-violet-bright">
+            <span aria-hidden="true" className="inline-block h-2 w-2 border border-violet-bright" />
+            Rule-based explanation — not AI
+          </p>
+          <ul className="mt-3 space-y-2 text-sm leading-relaxed text-ivory/70">
+            {selected.method.map((line, index) => (
+              <li key={index}>• {line}</li>
+            ))}
+          </ul>
+        </div>
+        <p className="mt-4 text-xs leading-relaxed text-ivory/45">
+          Room bands: Adequate below {NEEDS_THRESHOLDS.stressed}, Stressed {NEEDS_THRESHOLDS.stressed}–
+          {NEEDS_THRESHOLDS.critical - 1}, Critical {NEEDS_THRESHOLDS.critical} and above. Missing values remain missing
+          and are never treated as zero.
+        </p>
       </Modal>
     </div>
   )

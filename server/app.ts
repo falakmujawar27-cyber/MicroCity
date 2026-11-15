@@ -6,10 +6,14 @@
  * account does not belong to, and all record writes pass through the
  * server-authoritative validators in record-validation.ts.
  */
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { CAMPUS_ENTITIES, ENTITY_BY_NAME, IMPORT_ORDER } from '../src/domain/entities.ts'
-import { ALL_ROLES, hasCapability } from '../src/domain/permissions.ts'
+import { ALL_ROLES, capabilityMatrix, hasCapability } from '../src/domain/permissions.ts'
+import { analyseWorkspace } from '../src/domain/analysis/index.ts'
+import type { MeterAnalysis } from '../src/domain/analysis/index.ts'
+import { COMPLAINT_CATEGORIES } from '../src/domain/types.ts'
+import { titleCase } from '../src/lib/format.ts'
 import type {
   Asset,
   AttendanceReason,
@@ -34,9 +38,20 @@ import type {
   UserRole,
   WorkspacePayload,
 } from '../src/domain/types.ts'
-import { ATTENDANCE_REASONS, INSPECTION_RESULTS } from '../src/domain/types.ts'
+import { ATTENDANCE_REASONS, INSPECTION_RESULTS, DEFAULT_PRIORITY_WEIGHTS } from '../src/domain/types.ts'
 import { istDateKey } from '../src/lib/time.ts'
+import { buildReportFacts, weakestTag } from '../src/lib/reports.ts'
+import type { FigureTag } from '../src/lib/reports.ts'
 import { loadAiSettings, runAiTask, type AiTask } from './ai.ts'
+import { guardAiNumbers } from './number-guard.ts'
+import {
+  parseNeedsLimit,
+  parsePriorityWeightsInput,
+  readNeedsLimits,
+  readPriorityWeights,
+  saveNeedsLimit,
+  savePriorityWeights,
+} from './config.ts'
 import type { Database, StoredRecord, StoredUser } from './db.ts'
 import { hashPassword, verifyPassword } from './passwords.ts'
 import { SAMPLE_ACCOUNTS } from './seed.ts'
@@ -272,6 +287,28 @@ export function createMicrocityApp(options: {
   /* Workspace shaping                                              */
   /* -------------------------------------------------------------- */
 
+  function issueOriginCollege(data: Record<string, unknown>): string | null {
+    const stored = typeof data.reporterCollegeId === 'string' ? data.reporterCollegeId : ''
+    if (stored) return stored
+    const reporterId = typeof data.reporterId === 'string' ? data.reporterId : ''
+    const memberships = reporterId ? db.getMemberships(reporterId) : []
+    return memberships.length === 1 ? memberships[0].collegeId : null
+  }
+
+  function publicIssueForCollege(data: Record<string, unknown>, collegeId: string): UrbanIssue {
+    const item = data as unknown as UrbanIssue
+    const sameCollege = issueOriginCollege(data) === collegeId
+    return {
+      id: item.id, urbanAssetId: item.urbanAssetId,
+      reporterId: sameCollege ? item.reporterId : null,
+      reporterName: sameCollege && item.reporterId ? db.getUser(item.reporterId)?.displayName : undefined,
+      category: item.category, severity: item.severity, description: item.description,
+      locationLabel: item.locationLabel, authority: item.authority, reportedAt: item.reportedAt,
+      status: item.status, resolvedAt: item.resolvedAt, note: item.note ?? null,
+      photoName: item.photoName, photoDataUrl: item.photoDataUrl,
+    }
+  }
+
   function buildWorkspace(session: SessionRecord, active: ActiveCollege): WorkspacePayload {
     const role = active.role
     const full = role === 'admin' || role === 'estates'
@@ -309,21 +346,30 @@ export function createMicrocityApp(options: {
             )
 
     const visibleComplaintIds = new Set(complaints.map((item) => item.id))
+    // Photos are only served by the authorised photo endpoint. Lists carry the
+    // presence flags, never the base64 bytes, for every role.
     const enrichedComplaints = complaints.map((item) => ({
       ...item,
       reporterName: nameOf(item.reporterId) ?? 'Unknown reporter',
       assignedToName: nameOf(item.assignedToUserId),
+      hasPhoto: Boolean(item.photoDataUrl),
+      hasCompletionPhoto: Boolean(item.completionPhotoDataUrl),
+      photoDataUrl: undefined,
+      completionPhotoDataUrl: undefined,
     }))
 
     const visibleUpdates = campus('complaintUpdates').filter((record) =>
       visibleComplaintIds.has(String(record.data.complaintId ?? '')),
     )
 
+    // Unassigned inspections belong to the whole college's maintenance team;
+    // once an inspector is recorded only that person keeps working on it.
     const inspections =
       role === 'maintenance'
-        ? campus('inspections').filter(
-            (record) => String(record.data.inspectorUserId ?? '') === session.user.id,
-          )
+        ? campus('inspections').filter((record) => {
+            const inspector = String(record.data.inspectorUserId ?? '')
+            return inspector === '' || inspector === session.user.id
+          })
         : role === 'faculty' || role === 'student'
           ? []
           : campus('inspections')
@@ -336,11 +382,13 @@ export function createMicrocityApp(options: {
         }))
       : []
 
+    // Public issues are college-scoped for viewing (Phase G): an issue is
+    // visible only inside the college whose account reported it. Other
+    // colleges see none of it — description, photo, note or reporter.
     const urbanIssues = canSeePublic
-      ? dataOf<UrbanIssue>(publicRecords('urbanIssues')).map((item) => ({
-          ...item,
-          reporterName: nameOf(item.reporterId) ?? 'Unknown reporter',
-        }))
+      ? publicRecords('urbanIssues')
+          .filter((record) => issueOriginCollege(record.data) === active.collegeId)
+          .map((record) => publicIssueForCollege(record.data, active.collegeId))
       : []
 
     const canViewTimetable = full || role === 'faculty'
@@ -372,6 +420,7 @@ export function createMicrocityApp(options: {
       complaintUpdates: dataOf(visibleUpdates),
       planOptions: viewPlan ? dataOf(campus('planOptions')) : [],
       decisions,
+      nearbyAssets: dataOf(campus('nearbyAssets')),
       urbanAssets: canSeePublic ? dataOf(publicRecords('urbanAssets')) : [],
       urbanIssues,
     } as unknown as DatasetSources
@@ -425,6 +474,10 @@ export function createMicrocityApp(options: {
       imports,
       audit,
       members,
+      needsLimits: full ? readNeedsLimits(db, active.collegeId) : [],
+      // Every role that ranks work receives the same administrator-set weights,
+      // so the order a person sees matches the audited configuration.
+      priorityWeights: readPriorityWeights(db, active.collegeId) ?? { ...DEFAULT_PRIORITY_WEIGHTS },
       serverTime: new Date().toISOString(),
     }
   }
@@ -508,6 +561,11 @@ export function createMicrocityApp(options: {
     if (spec.scope === 'public' && record.collegeId !== null) {
       throw new HttpError(404, 'Record not found.')
     }
+    // Public issues are scoped to their origin college for every operation,
+    // including updates: another college's issue simply does not exist here.
+    if (entity === 'urbanIssues' && issueOriginCollege(record.data) !== active.collegeId) {
+      throw new HttpError(404, 'Record not found.')
+    }
     return record
   }
 
@@ -565,7 +623,7 @@ export function createMicrocityApp(options: {
     if (entity === 'complaints') {
       addComplaintEvent(active, actor, id, 'created', 'Complaint submitted.', null, 'open')
     }
-    sendJson(res, 201, { record: data })
+    sendJson(res, 201, { record: entity === 'urbanIssues' ? publicIssueForCollege(data, active.collegeId) : data })
   }
 
   async function handleRecordUpdate(
@@ -638,10 +696,22 @@ export function createMicrocityApp(options: {
       }
     }
 
-    writeAudit(active, actor, 'update', entity, existing.id, `Updated ${describeRecord(entity, result.record)}.`, {
-      fields: Object.keys(body.data).filter((key) => key !== 'photoDataUrl'),
-    })
-    sendJson(res, 200, { record: result.record, meta: result.meta })
+    const transition = result.meta.statusChange
+    writeAudit(
+      active,
+      actor,
+      'update',
+      entity,
+      existing.id,
+      transition
+        ? `Changed ${entity === 'complaints' ? 'complaint' : entity} status from ${transition.from} to ${transition.to}.`
+        : `Updated ${describeRecord(entity, result.record)}.`,
+      {
+        fields: Object.keys(body.data).filter((key) => key !== 'photoDataUrl'),
+        ...(transition ? { fromStatus: transition.from, toStatus: transition.to } : {}),
+      },
+    )
+    sendJson(res, 200, { record: entity === 'urbanIssues' ? publicIssueForCollege(result.record, active.collegeId) : result.record, meta: result.meta })
   }
 
   function handleRecordDelete(
@@ -870,29 +940,46 @@ export function createMicrocityApp(options: {
     const rooms = dataOfList<Room>(db.listRecords('rooms', active.collegeId))
     const buildings = dataOfList<Building>(db.listRecords('buildings', active.collegeId))
     const assets = dataOfList<Asset>(db.listRecords('assets', active.collegeId))
-    return buildJobCards([complaint], rooms, buildings, assets, asOf)[0]
+    const scope = db
+      .listRecords('complaints', active.collegeId)
+      .map((record) => record.data as unknown as Complaint)
+    return buildJobCards([complaint], rooms, buildings, assets, asOf, scope)[0]
   }
 
   function maintenanceJobCards(active: ActiveCollege, actor: Actor, asOf: string): JobCard[] {
-    const complaints = db
+    // The analysis scope is every complaint in the college so repeat counts and
+    // priority points match the staff view; only this technician's jobs become
+    // cards, so colleagues' report details never reach this response.
+    const collegeComplaints = db
       .listRecords('complaints', active.collegeId)
-      .filter((record) => String(record.data.assignedToUserId ?? '') === actor.id)
       .map((record) => record.data as unknown as Complaint)
+    const mine = collegeComplaints.filter(
+      (complaint) => String(complaint.assignedToUserId ?? '') === actor.id,
+    )
     return buildJobCards(
-      complaints,
+      mine,
       dataOfList<Room>(db.listRecords('rooms', active.collegeId)),
       dataOfList<Building>(db.listRecords('buildings', active.collegeId)),
       dataOfList<Asset>(db.listRecords('assets', active.collegeId)),
       asOf,
+      collegeComplaints,
     )
   }
 
   function maintenanceInspections(active: ActiveCollege, actor: Actor, asOf: string): InspectionCard[] {
     const inspections = db
       .listRecords('inspections', active.collegeId)
-      .filter((record) => String(record.data.inspectorUserId ?? '') === actor.id)
+      .filter((record) => {
+        const inspector = String(record.data.inspectorUserId ?? '')
+        return inspector === '' || inspector === actor.id
+      })
       .map((record) => record.data as unknown as Inspection)
-    return buildInspectionCards(inspections, dataOfList<Asset>(db.listRecords('assets', active.collegeId)), asOf)
+    return buildInspectionCards(
+      inspections,
+      dataOfList<Asset>(db.listRecords('assets', active.collegeId)),
+      asOf,
+      (userId) => (userId ? db.getUser(userId)?.displayName ?? null : null),
+    )
   }
 
   async function handleJobsRead(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -1063,6 +1150,51 @@ export function createMicrocityApp(options: {
         findings: note,
       },
     })
+  }
+
+  /**
+   * Complaint photos are only served through this endpoint. It re-checks the
+   * college, the role and ownership before reading the stored data URL, so a
+   * URL alone never grants access to another student's or college's photo.
+   */
+  async function handleComplaintPhoto(
+    req: IncomingMessage,
+    res: ServerResponse,
+    id: string,
+    url: URL,
+  ): Promise<void> {
+    const session = requireSession(req)
+    const active = requireActive(req, url, session)
+    const actor = actorFrom(session, active)
+    const record = id ? db.getRecord(id) : undefined
+    if (!record || record.entity !== 'complaints' || record.collegeId !== active.collegeId) {
+      throw new HttpError(404, 'That report is not in this college.')
+    }
+    const complaint = record.data as unknown as Complaint
+    const allowed =
+      active.role === 'admin' ||
+      active.role === 'estates' ||
+      (active.role === 'maintenance' && String(complaint.assignedToUserId ?? '') === actor.id) ||
+      String(complaint.reporterId ?? '') === actor.id
+    if (!allowed) {
+      throw new HttpError(403, 'You cannot view a photo on this report.')
+    }
+
+    const kind = url.searchParams.get('kind') === 'completion' ? 'completion' : 'report'
+    const dataUrl = kind === 'completion' ? complaint.completionPhotoDataUrl : complaint.photoDataUrl
+    const match = typeof dataUrl === 'string' ? /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl) : null
+    if (!match) {
+      throw new HttpError(404, kind === 'completion' ? 'No after photo is recorded.' : 'No report photo is recorded.')
+    }
+    const bytes = Buffer.from(match[2], 'base64')
+    res.writeHead(200, {
+      'Content-Type': match[1],
+      'Content-Length': bytes.length,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': `inline; filename="${kind === 'completion' ? 'after-photo' : 'report-photo'}"`,
+    })
+    res.end(bytes)
   }
 
   /* -------------------------------------------------------------- */
@@ -1256,6 +1388,115 @@ export function createMicrocityApp(options: {
   }
 
   /* -------------------------------------------------------------- */
+  /* Per-college configuration (administrator only)                 */
+  /* -------------------------------------------------------------- */
+
+  async function handleNeedsLimit(
+    req: IncomingMessage,
+    res: ServerResponse,
+    category: string,
+  ): Promise<void> {
+    const session = requireSession(req)
+    const active = requireActive(req, new URL(req.url ?? '/', 'http://localhost'), session)
+    const actor = actorFrom(session, active)
+    if (!hasCapability(active.role, 'manage-thresholds')) {
+      throw new HttpError(403, 'Only an administrator can set a limit or its source.')
+    }
+    const body = await readJson(req)
+    const parsed = parseNeedsLimit(category, body)
+    if (!parsed.ok) throw new HttpError(422, parsed.error)
+    const previous = readNeedsLimits(db, active.collegeId).find((entry) => entry.category === category) ?? null
+    const config = {
+      category,
+      ...parsed.value,
+      updatedAt: new Date().toISOString(),
+      updatedByName: actor.displayName,
+    }
+    saveNeedsLimit(db, active.collegeId, config)
+    writeAudit(
+      active,
+      actor,
+      'threshold',
+      'needsLimit',
+      category,
+      `Set the ${category} limit to ${config.limit} ${config.unit} (${config.kind === 'published_norm' ? 'Published norm' : 'Project assumption'}). Source: ${config.source}.`,
+      { old: previous, new: config },
+    )
+    sendJson(res, 200, { config, needsLimits: readNeedsLimits(db, active.collegeId) })
+  }
+
+  async function handlePriorityWeights(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const session = requireSession(req)
+    const active = requireActive(req, new URL(req.url ?? '/', 'http://localhost'), session)
+    const actor = actorFrom(session, active)
+    if (!hasCapability(active.role, 'manage-priority-weights')) {
+      throw new HttpError(403, 'Only an administrator can change the priority weights.')
+    }
+    const body = await readJson(req)
+    const parsed = parsePriorityWeightsInput(body)
+    if (!parsed.ok) throw new HttpError(422, parsed.error)
+    const previous = readPriorityWeights(db, active.collegeId)
+    const weights = {
+      ...parsed.value,
+      updatedAt: new Date().toISOString(),
+      updatedByName: actor.displayName,
+    }
+    savePriorityWeights(db, active.collegeId, weights)
+    writeAudit(
+      active,
+      actor,
+      'weights',
+      'priorityWeights',
+      null,
+      `Changed maintenance priority weights: severity ${previous.severity} to ${weights.severity}, condition ${previous.condition} to ${weights.condition}, users affected ${previous.usersAffected} to ${weights.usersAffected}, days open ${previous.daysOpen} to ${weights.daysOpen}.`,
+      { old: previous, new: weights },
+    )
+    sendJson(res, 200, { weights })
+  }
+
+  function requireAdminRead(req: IncomingMessage): { active: ActiveCollege } {
+    const session = requireSession(req)
+    const active = requireActive(req, new URL(req.url ?? '/', 'http://localhost'), session)
+    if (!hasCapability(active.role, 'manage-users')) {
+      throw new HttpError(403, 'This administrator view is available to administrators only.')
+    }
+    return { active }
+  }
+
+  function handleAdminAudit(req: IncomingMessage, res: ServerResponse): void {
+    const { active } = requireAdminRead(req)
+    sendJson(res, 200, {
+      audit: db.listAudit(active.collegeId, 120).map((row) => ({
+        id: row.id,
+        at: row.at,
+        actorName: row.actorName,
+        action: row.action,
+        entity: row.entity,
+        entityId: row.entityId,
+        detail: row.detail,
+        metadata: row.metadata,
+      })),
+    })
+  }
+
+  function handleAdminAiSettings(req: IncomingMessage, res: ServerResponse): void {
+    requireAdminRead(req)
+    const stats = db.aiCallsToday()
+    sendJson(res, 200, {
+      configured: Boolean(aiSettings),
+      model: aiSettings?.model ?? null,
+      callsToday: stats.calls,
+      rejectedToday: stats.rejected,
+      dataNote: 'Text you type in a report and the facts behind a finding are sent to the AI provider.',
+    })
+  }
+
+  function handleAdminRoleMatrix(req: IncomingMessage, res: ServerResponse): void {
+    requireAdminRead(req)
+    sendJson(res, 200, { capabilities: capabilityMatrix() })
+  }
+
+  /* -------------------------------------------------------------- */
   /* Import                                                         */
   /* -------------------------------------------------------------- */
 
@@ -1268,7 +1509,7 @@ export function createMicrocityApp(options: {
     const active = requireActive(req, new URL(req.url ?? '/', 'http://localhost'), session)
     const actor = actorFrom(session, active)
     if (!hasCapability(active.role, 'import-data')) {
-      throw new HttpError(403, 'Only administrators and estates staff can import data.')
+      throw new HttpError(403, 'Only an administrator can import data.')
     }
     const body = await readJson(req, 25_000_000)
     const request = parseImportRequest(body)
@@ -1675,8 +1916,309 @@ export function createMicrocityApp(options: {
   }
 
   /* -------------------------------------------------------------- */
-  /* AI proxy                                                       */
+  /* AI proxy (Phase G)                                             */
+  /*                                                                */
+  /* One server function (`runAiTask`) talks to the provider. Calls  */
+  /* are rate-limited per user, identical requests are cached for   */
+  /* ten minutes, every provider attempt is logged without prompt   */
+  /* text or response bodies, and user-typed text is delimited and  */
+  /* marked as data. Text answers pass a number guard before they   */
+  /* are shown; a rejected answer is never stored.                  */
   /* -------------------------------------------------------------- */
+
+  const AI_CACHE_TTL_MS = 10 * 60 * 1000
+  const aiCache = new Map<string, { at: number; payload: Record<string, unknown> }>()
+
+  function aiCacheKey(
+    task: AiTask,
+    collegeId: string,
+    facts: unknown,
+    question: string | null,
+  ): string {
+    return createHash('sha256')
+      .update(`${task}\u0000${collegeId}\u0000${JSON.stringify(facts)}\u0000${question ?? ''}`)
+      .digest('hex')
+  }
+
+  function aiCacheGet(key: string): Record<string, unknown> | null {
+    const hit = aiCache.get(key)
+    if (!hit) return null
+    if (Date.now() - hit.at > AI_CACHE_TTL_MS) {
+      aiCache.delete(key)
+      return null
+    }
+    return hit.payload
+  }
+
+  function aiCachePut(key: string, payload: Record<string, unknown>): void {
+    if (aiCache.size > 500) {
+      for (const [staleKey, entry] of aiCache) {
+        if (Date.now() - entry.at > AI_CACHE_TTL_MS) aiCache.delete(staleKey)
+      }
+    }
+    aiCache.set(key, { at: Date.now(), payload })
+  }
+
+  function logAiCall(
+    userId: string,
+    feature: string,
+    refId: string | null,
+    accepted: boolean,
+    reason: string,
+  ): void {
+    db.addAiCall({ userId, feature, refId, accepted, reason })
+  }
+
+  function extractJson(text: string | null): Record<string, unknown> | null {
+    if (!text) return null
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    if (start < 0 || end <= start) return null
+    try {
+      const parsed: unknown = JSON.parse(text.slice(start, end + 1))
+      return isRecord(parsed) ? parsed : null
+    } catch {
+      return null
+    }
+  }
+
+  async function runGuardedTextTask(
+    session: SessionRecord,
+    active: ActiveCollege,
+    args: {
+      task: 'explain-finding' | 'report-summary' | 'option-comparison'
+      facts: Record<string, unknown>
+      refId: string | null
+      question?: string
+      /** Exact line count the answer must have (report summary: five). */
+      requireLines?: number
+    },
+  ): Promise<Record<string, unknown>> {
+    const cacheKey = aiCacheKey(args.task, active.collegeId, args.facts, args.question ?? null)
+    const cached = aiCacheGet(cacheKey)
+    if (cached) {
+      logAiCall(
+        session.user.id,
+        args.task,
+        args.refId,
+        cached.accepted === true,
+        cached.accepted === true ? 'cache_hit' : String(cached.reason ?? 'cache_hit_rejected'),
+      )
+      return cached
+    }
+
+    const answer = await runAiTask(aiSettings!, args.task, args.facts, { question: args.question })
+    if (!answer.ok) {
+      logAiCall(session.user.id, args.task, args.refId, false, 'provider_error')
+      return {
+        ok: false,
+        configured: true,
+        accepted: false,
+        error: answer.error,
+        text: null,
+        model: answer.model,
+        label: 'Rule-based explanation',
+      }
+    }
+    const guard = guardAiNumbers(answer.text ?? '', args.facts)
+    if (!guard.ok) {
+      logAiCall(session.user.id, args.task, args.refId, false, 'unsupported_number')
+      db.addAudit({
+        collegeId: active.collegeId,
+        actorId: session.user.id,
+        actorName: 'AI guard',
+        action: 'ai_rejected',
+        entity: 'ai',
+        entityId: args.refId,
+        detail: 'AI answer rejected: unsupported number',
+        metadata: null,
+      })
+      const payload = {
+        ok: true,
+        configured: true,
+        accepted: false,
+        text: null,
+        reason: 'unsupported_number',
+        label: 'Rule-based explanation',
+        model: answer.model,
+        checkedAt: new Date().toISOString(),
+      }
+      aiCachePut(cacheKey, payload)
+      return payload
+    }
+    if (args.requireLines) {
+      const lineCount = (answer.text ?? '').split('\n').filter((line) => line.trim()).length
+      if (lineCount !== args.requireLines) {
+        logAiCall(session.user.id, args.task, args.refId, false, 'not_five_lines')
+        const payload = {
+          ok: true,
+          configured: true,
+          accepted: false,
+          text: null,
+          reason: 'not_five_lines',
+          label: 'Rule-based explanation',
+          model: answer.model,
+          checkedAt: new Date().toISOString(),
+        }
+        aiCachePut(cacheKey, payload)
+        return payload
+      }
+    }
+    logAiCall(session.user.id, args.task, args.refId, true, 'accepted')
+    const payload = {
+      ok: true,
+      configured: true,
+      accepted: true,
+      text: answer.text,
+      model: answer.model,
+      label: 'AI-generated, please verify',
+      checkedAt: new Date().toISOString(),
+    }
+    aiCachePut(cacheKey, payload)
+    return payload
+    aiCachePut(cacheKey, payload)
+    return payload
+  }
+
+  const AI_LOOKUPS: { id: string; question: string }[] = [
+    { id: 'rooms-over-capacity', question: 'Which rooms have demand above their seat capacity?' },
+    { id: 'meters-with-spikes', question: 'Which meters have flagged consumption spikes?' },
+    { id: 'open-critical-issues', question: 'Which critical issues are still open?' },
+    { id: 'nearby-critical', question: 'Which nearby public infrastructure types are in Critical status?' },
+    { id: 'decisions-waiting', question: 'Which plan options are waiting for a decision?' },
+  ]
+
+  function meterFigureTagFor(meter: MeterAnalysis): FigureTag {
+    if (meter.knownPeriods === 0) return 'Missing'
+    return meter.measurementType === 'estimated' ? 'Estimated' : 'Measured'
+  }
+
+  /**
+   * The server — never the model — computes the lookup result from stored
+   * records. The AI only maps the question to one fixed lookup id.
+   */
+  function runDataLookup(
+    session: SessionRecord,
+    active: ActiveCollege,
+    lookupId: string,
+  ): { title: string; items: { label: string; detail: string; tag: FigureTag }[]; note: string } {
+    const payload = buildWorkspace(session, active)
+    const analysis = analyseWorkspace(payload.dataset, payload.serverTime, payload.priorityWeights)
+    const items: { label: string; detail: string; tag: FigureTag }[] = []
+    let title = 'Data lookup'
+    let note = ''
+
+    if (lookupId === 'rooms-over-capacity') {
+      title = 'Rooms over capacity'
+      note = 'Peak enrolled is the largest expected class booked in the room; capacity is recorded seats.'
+      for (const room of analysis.capacity.rooms) {
+        if (room.expectedPeak === null || room.capacity === null || room.expectedPeak <= room.capacity) continue
+        items.push({
+          label: `Room ${room.code}`,
+          detail: `Peak enrolled ${room.expectedPeak} against ${room.capacity} seats (${room.expectedPeak - room.capacity} over).`,
+          tag: 'Measured',
+        })
+      }
+    } else if (lookupId === 'meters-with-spikes') {
+      title = 'Meters with flagged spikes'
+      note = 'Spikes are statistical prompts from recorded readings; the cause is unknown.'
+      for (const meter of analysis.utilities.meters) {
+        for (const spike of meter.spikes) {
+          items.push({
+            label: meter.meter.label,
+            detail: `${spike.consumption} ${meter.meter.unit} on ${spike.at.slice(0, 10)}, ${Math.round(spike.deviationPct * 100)}% above the comparison baseline.`,
+            tag: meterFigureTagFor(meter),
+          })
+        }
+      }
+    } else if (lookupId === 'open-critical-issues') {
+      title = 'Open critical issues'
+      note = 'Campus complaints with severity Critical still Open or In progress.'
+      for (const complaint of payload.dataset.complaints) {
+        if (complaint.severity !== 'critical') continue
+        if (complaint.status !== 'open' && complaint.status !== 'in_progress') continue
+        items.push({
+          label: complaint.ticketNumber ?? complaint.id,
+          detail: `${complaint.category}: ${complaint.description.slice(0, 140)}`,
+          tag: 'Measured',
+        })
+      }
+    } else if (lookupId === 'nearby-critical') {
+      title = 'Nearby types in Critical status'
+      note = 'Status comes from recorded conditions; daily users never decide status.'
+      for (const row of analysis.nearby) {
+        if (row.status !== 'critical') continue
+        items.push({
+          label: row.label,
+          detail: `${row.poor} of ${row.recorded} recorded conditions are Poor.`,
+          tag: weakestTag(row.records.map((asset) => titleCase(asset.basis) as FigureTag)),
+        })
+      }
+    } else if (lookupId === 'decisions-waiting') {
+      title = 'Plan options waiting for a decision'
+      note = 'Options with no decision yet, plus proposals awaiting an administrator decision.'
+      for (const option of analysis.plan.options) {
+        if (option.approvalState !== 'none' && option.approvalState !== 'proposed') continue
+        items.push({
+          label: option.title,
+          detail:
+            option.approvalState === 'proposed'
+              ? 'Proposed — awaiting administrator decision.'
+              : 'No decision recorded yet.',
+          tag: 'Illustrative',
+        })
+      }
+    } else {
+      throw new HttpError(422, 'Unknown lookup.')
+    }
+    return { title, items, note }
+  }
+
+  function roomsForSuggestion(active: ActiveCollege): {
+    id: string
+    code: string
+    name: string | null
+    building: string | null
+  }[] {
+    const buildingNames = new Map(
+      db.listRecords('buildings', active.collegeId).map((record) => [
+        String(record.id),
+        String(record.data.name ?? 'Building'),
+      ]),
+    )
+    return db.listRecords('rooms', active.collegeId).map((record) => ({
+      id: String(record.id),
+      code: String(record.data.code ?? ''),
+      name: typeof record.data.name === 'string' ? record.data.name : null,
+      building: buildingNames.get(String(record.data.buildingId ?? '')) ?? null,
+    }))
+  }
+
+  function validatedSuggestion(
+    parsed: Record<string, unknown>,
+    rooms: { id: string; code: string; name: string | null; building: string | null }[],
+  ): { category: string; roomId: string | null; roomLabel: string | null; severity: string | null } | null {
+    const categoryRaw = typeof parsed.category === 'string' ? parsed.category.trim() : ''
+    const category = COMPLAINT_CATEGORIES.find((item) => item.toLowerCase() === categoryRaw.toLowerCase())
+    // An off-list category is discarded entirely; the user gets no suggestion.
+    if (!category) return null
+    const roomRaw = typeof parsed.room === 'string' ? parsed.room.trim() : ''
+    const room = roomRaw
+      ? rooms.find((item) => item.id.toLowerCase() === roomRaw.toLowerCase()) ??
+        rooms.find((item) => item.code.toLowerCase() === roomRaw.toLowerCase()) ??
+        null
+      : null
+    const severityRaw = typeof parsed.severity === 'string' ? parsed.severity.trim().toLowerCase() : ''
+    const severity = ['low', 'medium', 'high', 'critical'].includes(severityRaw) ? severityRaw : null
+    return {
+      category,
+      roomId: room?.id ?? null,
+      roomLabel: room
+        ? `${room.code} — ${room.name ?? 'room'} · ${room.building ?? 'building'}`
+        : null,
+      severity,
+    }
+  }
 
   async function handleAiAssist(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const session = requireSession(req)
@@ -1693,11 +2235,6 @@ export function createMicrocityApp(options: {
     if (!allowedTasks[active.role].includes(task)) {
       throw new HttpError(403, 'Your role cannot use this AI task.')
     }
-    if (!isRecord(body.facts) && !Array.isArray(body.facts)) {
-      throw new HttpError(400, 'The request must include computed facts for the assistant.')
-    }
-    const question = typeof body.question === 'string' ? body.question.slice(0, 500) : undefined
-    bumpLimit(aiUsage, session.user.id, 15, 60_000, 'The assistant has been used frequently.')
     if (!aiSettings) {
       sendJson(res, 503, {
         ok: false,
@@ -1709,24 +2246,279 @@ export function createMicrocityApp(options: {
       })
       return
     }
-    const answer = await runAiTask(aiSettings, task, body.facts, question)
-    if (!answer.ok) {
-      sendJson(res, 502, {
-        ok: false,
+    bumpLimit(aiUsage, session.user.id, 15, 60_000, 'The assistant has been used frequently.')
+
+    if (task === 'explain-finding') {
+      const finding = isRecord(body.finding) ? body.finding : null
+      if (!finding) throw new HttpError(400, 'Send the finding to explain in "finding".')
+      const workspace = buildWorkspace(session, active)
+      const analysis = analyseWorkspace(workspace.dataset, workspace.serverTime, workspace.priorityWeights)
+      const requestedId = typeof finding.id === 'string' ? finding.id.slice(0, 120) : ''
+      const computed = analysis.findings.find((item) => item.id === requestedId)
+      if (!computed) throw new HttpError(404, 'That finding is not in the current college analysis.')
+      // Only a finding recomputed from this college's stored records is sent.
+      // Its evidence carries the recorded values, units, rule and threshold
+      // context; the client cannot add numbers to the facts the guard trusts.
+      const findingFacts = {
+        findingId: computed.id,
+        module: computed.module,
+        severity: computed.severity,
+        title: computed.title,
+        summary: computed.summary,
+        ruleName: `${computed.module} deterministic analysis`,
+        thresholdType:
+          typeof computed.facts.thresholdType === 'string'
+            ? computed.facts.thresholdType
+            : 'existing deterministic rule',
+        thresholdSource:
+          typeof computed.facts.thresholdSource === 'string'
+            ? computed.facts.thresholdSource
+            : 'MicroCity analysis of this college’s recorded data',
+        evidence: computed.evidence,
+        limitations: computed.limitations,
+        facts: computed.facts,
+      }
+      const payload = await runGuardedTextTask(session, active, {
+        task: 'explain-finding',
+        facts: findingFacts,
+        refId: computed.id,
+      })
+      sendJson(res, payload.ok === false ? 502 : 200, payload)
+      return
+    }
+
+    if (task === 'report-summary') {
+      const workspace = buildWorkspace(session, active)
+      const analysis = analyseWorkspace(workspace.dataset, workspace.serverTime, workspace.priorityWeights)
+      const facts = buildReportFacts({
+        workspace,
+        analysis,
+        preparedBy: session.user.displayName,
+        roleLabel: active.role,
+      })
+      const payload = await runGuardedTextTask(session, active, {
+        task: 'report-summary',
+        facts,
+        refId: 'report-summary',
+        requireLines: 5,
+      })
+      sendJson(res, payload.ok === false ? 502 : 200, payload)
+      return
+    }
+
+    if (task === 'option-comparison') {
+      const workspace = buildWorkspace(session, active)
+      const analysis = analyseWorkspace(workspace.dataset, workspace.serverTime, workspace.priorityWeights)
+      const facts = {
+        options: analysis.plan.options.map((option) => ({
+          title: option.title,
+          type: option.optionType,
+          capitalCost: option.capitalCost,
+          annualCost: option.annualCost,
+          annualSavings: option.annualSavings,
+          netAnnualBenefit: option.netAnnualBenefit,
+          simplePaybackMonths: option.simplePaybackMonths,
+          seatEffect: option.seatEffect,
+          disruptionDays: option.disruptionDays,
+          implementationWeeks: option.implementationWeeks,
+          approvalState: option.approvalState,
+        })),
+      }
+      const payload = await runGuardedTextTask(session, active, {
+        task: 'option-comparison',
+        facts,
+        refId: 'option-comparison',
+      })
+      sendJson(res, payload.ok === false ? 502 : 200, payload)
+      return
+    }
+
+    if (task === 'categorise-issue') {
+      const text = typeof body.text === 'string' ? body.text.trim().slice(0, 4_000) : ''
+      if (!text) throw new HttpError(422, 'Type what is wrong before asking for a suggestion.')
+      const rooms = roomsForSuggestion(active)
+      // Only the typed text and the allowed lists are sent. The typed text is
+      // delimited and marked as data, so an instruction inside it is not a
+      // prompt: the reply can only fill the validated suggested fields.
+      const facts = {
+        categories: [...COMPLAINT_CATEGORIES],
+        severities: ['low', 'medium', 'high', 'critical'],
+        rooms,
+      }
+      const cacheKey = aiCacheKey(task, active.collegeId, { facts, text }, null)
+      const cached = aiCacheGet(cacheKey)
+      if (cached) {
+        logAiCall(
+          session.user.id,
+          task,
+          'categorise-issue',
+          cached.accepted === true,
+          cached.accepted === true ? 'cache_hit' : String(cached.reason ?? 'cache_hit_rejected'),
+        )
+        sendJson(res, 200, cached)
+        return
+      }
+      const answer = await runAiTask(aiSettings, 'categorise-issue', facts, { userData: text })
+      if (!answer.ok) {
+        logAiCall(session.user.id, task, 'categorise-issue', false, 'provider_error')
+        sendJson(res, 502, {
+          ok: false,
+          configured: true,
+          error: answer.error,
+          text: null,
+          model: answer.model,
+        })
+        return
+      }
+      const parsed = extractJson(answer.text)
+      if (!parsed) {
+        logAiCall(session.user.id, task, 'categorise-issue', false, 'malformed_json')
+        const payload = {
+          ok: true,
+          configured: true,
+          accepted: false,
+          suggestion: null,
+          reason: 'malformed_json',
+          label: 'Rule-based explanation',
+        }
+        aiCachePut(cacheKey, payload)
+        sendJson(res, 200, payload)
+        return
+      }
+      const suggestion = validatedSuggestion(parsed, rooms)
+      if (!suggestion) {
+        logAiCall(session.user.id, task, 'categorise-issue', false, 'off_list_category')
+        const payload = {
+          ok: true,
+          configured: true,
+          accepted: false,
+          suggestion: null,
+          reason: 'off_list_category',
+          label: 'Rule-based explanation',
+        }
+        aiCachePut(cacheKey, payload)
+        sendJson(res, 200, payload)
+        return
+      }
+      // Similar reports are computed by the server from stored records for
+      // the same room and category; the model never sees or writes them.
+      const similar = db
+        .listRecords('complaints', active.collegeId)
+        .filter(
+          (record) =>
+            record.data.category === suggestion.category &&
+            suggestion.roomId !== null &&
+            record.data.roomId === suggestion.roomId,
+        )
+        .map((record) => ({
+          ticketNumber: record.data.ticketNumber ?? record.id,
+          status: record.data.status,
+          raisedAt: record.data.raisedAt,
+        }))
+      logAiCall(session.user.id, task, 'categorise-issue', true, 'accepted')
+      const payload = {
+        ok: true,
         configured: true,
-        error: answer.error,
-        text: null,
+        accepted: true,
+        suggestion,
+        similarReports: { count: similar.length, samples: similar.slice(0, 3) },
         model: answer.model,
+        label: 'AI-generated, please verify',
+        checkedAt: new Date().toISOString(),
+      }
+      aiCachePut(cacheKey, payload)
+      sendJson(res, 200, payload)
+      return
+    }
+
+    // ask-data: the model maps the question to one lookup id; the server
+    // computes the answer from stored records and the model never sees data.
+    const question = typeof body.question === 'string' ? body.question.trim().slice(0, 500) : ''
+    if (!question) throw new HttpError(422, 'Type a question first.')
+    const facts = { lookups: AI_LOOKUPS }
+    const cacheKey = aiCacheKey(task, active.collegeId, facts, question)
+    const cached = aiCacheGet(cacheKey)
+    if (cached) {
+      logAiCall(
+        session.user.id,
+        task,
+        typeof cached.lookupId === 'string' ? cached.lookupId : 'ask-data',
+        cached.mapped === true,
+        cached.mapped === true ? 'cache_hit' : String(cached.reason ?? 'cache_hit_rejected'),
+      )
+      sendJson(res, 200, cached)
+      return
+    }
+    const answer = await runAiTask(aiSettings, 'ask-data', facts, { question })
+    if (!answer.ok) {
+      logAiCall(session.user.id, task, 'ask-data', false, 'provider_error')
+      sendJson(res, 502, { ok: false, configured: true, error: answer.error, text: null, model: answer.model })
+      return
+    }
+    const parsed = extractJson(answer.text)
+    const rawId = typeof parsed?.lookupId === 'string' ? parsed.lookupId.trim() : null
+    const lookup = AI_LOOKUPS.find((item) => item.id === rawId)
+    if (!lookup) {
+      // Unknown or missing lookup ids are discarded.
+      logAiCall(session.user.id, task, 'ask-data', false, 'unmapped_question')
+      const payload = {
+        ok: true,
+        configured: true,
+        mapped: false,
+        message: 'I cannot answer that',
+        reason: 'unmapped_question',
+        supported: AI_LOOKUPS.map((item) => item.question),
+      }
+      aiCachePut(cacheKey, payload)
+      sendJson(res, 200, payload)
+      return
+    }
+    const result = runDataLookup(session, active, lookup.id)
+    logAiCall(session.user.id, task, lookup.id, true, 'mapped')
+    const payload = {
+      ok: true,
+      configured: true,
+      mapped: true,
+      lookupId: lookup.id,
+      question: lookup.question,
+      title: result.title,
+      items: result.items,
+      note: result.note,
+      label: 'Data from college records — the answer text is not AI-written',
+      checkedAt: new Date().toISOString(),
+    }
+    aiCachePut(cacheKey, payload)
+    sendJson(res, 200, payload)
+  }
+
+  async function handleDataLookup(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const session = requireSession(req)
+    const active = requireActive(req, new URL(req.url ?? '/', 'http://localhost'), session)
+    if (!hasCapability(active.role, 'view-plan')) {
+      throw new HttpError(403, 'Your role cannot use the data lookups.')
+    }
+    const body = await readJson(req)
+    const lookupId = typeof body.lookupId === 'string' ? body.lookupId.trim() : ''
+    const lookup = AI_LOOKUPS.find((item) => item.id === lookupId)
+    if (!lookup) {
+      sendJson(res, 200, {
+        ok: true,
+        mapped: false,
+        message: 'Choose one of the supported questions.',
+        supported: AI_LOOKUPS.map((item) => item.question),
       })
       return
     }
+    const result = runDataLookup(session, active, lookup.id)
     sendJson(res, 200, {
       ok: true,
-      configured: true,
-      text: answer.text,
-      model: answer.model,
-      label: 'AI-generated — please verify',
-      checkedAt: new Date().toISOString(),
+      mapped: true,
+      lookupId: lookup.id,
+      question: lookup.question,
+      title: result.title,
+      items: result.items,
+      note: result.note,
+      label: 'Data from college records — no AI involved',
     })
   }
 
@@ -1797,12 +2589,16 @@ export function createMicrocityApp(options: {
       sendJson(res, 200, {
         configured: Boolean(aiSettings),
         model: aiSettings?.model ?? null,
-        label: 'AI-generated — please verify',
+        label: 'AI-generated, please verify',
       })
       return
     }
     if (method === 'POST' && pathname === '/api/ai/assist') {
       await handleAiAssist(req, res)
+      return
+    }
+    if (method === 'POST' && pathname === '/api/data-lookup') {
+      await handleDataLookup(req, res)
       return
     }
 
@@ -1834,6 +2630,12 @@ export function createMicrocityApp(options: {
       return
     }
 
+    const complaintPhotoMatch = pathname.match(/^\/api\/complaints\/([^/]+)\/photo$/)
+    if (complaintPhotoMatch && method === 'GET') {
+      await handleComplaintPhoto(req, res, decodeURIComponent(complaintPhotoMatch[1]), url)
+      return
+    }
+
     if (method === 'POST' && pathname === '/api/decisions') {
       await handleDecisionCreate(req, res)
       return
@@ -1853,6 +2655,30 @@ export function createMicrocityApp(options: {
     const memberMatch = pathname.match(/^\/api\/members\/([^/]+)$/)
     if (memberMatch && method === 'PATCH') {
       await handleMemberRole(req, res, decodeURIComponent(memberMatch[1]))
+      return
+    }
+
+    const needsLimitMatch = pathname.match(/^\/api\/needs-limits\/([^/]+)$/)
+    if (needsLimitMatch && method === 'PATCH') {
+      await handleNeedsLimit(req, res, decodeURIComponent(needsLimitMatch[1]))
+      return
+    }
+
+    if (pathname === '/api/priority-weights' && method === 'PATCH') {
+      await handlePriorityWeights(req, res)
+      return
+    }
+
+    if (pathname === '/api/admin/audit' && method === 'GET') {
+      handleAdminAudit(req, res)
+      return
+    }
+    if (pathname === '/api/admin/ai-settings' && method === 'GET') {
+      handleAdminAiSettings(req, res)
+      return
+    }
+    if (pathname === '/api/admin/role-matrix' && method === 'GET') {
+      handleAdminRoleMatrix(req, res)
       return
     }
 

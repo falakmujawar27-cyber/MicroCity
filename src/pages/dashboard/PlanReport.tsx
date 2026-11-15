@@ -11,18 +11,26 @@ import type { FormField } from '../../components/ui/RecordDialog'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import Modal from '../../components/ui/Modal'
 import FindingExplainer from '../../components/dashboard/FindingExplainer'
+import PrintReport from '../../components/dashboard/PrintReport'
 import { EmptyPanel } from '../../components/ui/PageState'
 import { Field, FormError, inputClass } from '../../components/ui/Form'
 import { api, ApiError } from '../../lib/api'
+import type { AiAssistResponse } from '../../lib/api'
 import { useAuth } from '../../auth/auth-context'
 import { downloadFile } from '../../lib/download'
-import { buildFindingsCsv, buildReportMarkdown, reportFileName } from '../../lib/reports'
+import {
+  buildReportCsv,
+  buildReportFacts,
+  buildReportMarkdown,
+  reportFileName,
+} from '../../lib/reports'
+import type { ReportSummary } from '../../lib/reports'
 import { formatCurrency, formatDateTime, titleCase } from '../../lib/format'
-import { ROLE_LABELS } from '../../domain/types'
+import { ROLE_LABELS, THRESHOLD_KIND_LABELS } from '../../domain/types'
 import type { Decision, DecisionStatus } from '../../domain/types'
 import type { Finding as AnalysisFinding } from '../../domain/analysis'
 
-type TabId = 'options' | 'decisions' | 'report' | 'ask'
+type TabId = 'options' | 'decisions' | 'report'
 
 interface Editor {
   entity: string
@@ -49,6 +57,15 @@ const DECISION_STATUS_OPTIONS = [
   { value: 'approved', label: 'Approved' },
   { value: 'rejected', label: 'Rejected' },
   { value: 'deferred', label: 'Deferred' },
+]
+
+/** The fixed lookup list, mirrored in the interface for the no-AI buttons. */
+const LOOKUP_BUTTONS = [
+  { id: 'rooms-over-capacity', label: 'Rooms over capacity' },
+  { id: 'meters-with-spikes', label: 'Meters with spikes' },
+  { id: 'open-critical-issues', label: 'Open critical issues' },
+  { id: 'nearby-critical', label: 'Nearby types in Critical status' },
+  { id: 'decisions-waiting', label: 'Decisions waiting' },
 ]
 
 function money(value: number | null): string {
@@ -189,13 +206,14 @@ export default function PlanReport() {
   const [explained, setExplained] = useState<AnalysisFinding | null>(null)
   const [decisionDialog, setDecisionDialog] = useState<{ optionId: string | null; decision: Decision | null } | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [aiSummary, setAiSummary] = useState<string | null>(null)
-  const [aiSummaryError, setAiSummaryError] = useState<string | null>(null)
-  const [aiSummaryBusy, setAiSummaryBusy] = useState(false)
-  const [question, setQuestion] = useState('')
+  const [printView, setPrintView] = useState(false)
+  const [summary, setSummary] = useState<ReportSummary | null>(null)
+  const [summaryBusy, setSummaryBusy] = useState(false)
+  const [summaryNote, setSummaryNote] = useState<string | null>(null)
+  const [askQuestion, setAskQuestion] = useState('')
   const [askBusy, setAskBusy] = useState(false)
-  const [askResult, setAskResult] = useState<{ kind: 'ai' | 'fallback' | 'none'; text: string } | null>(null)
   const [askError, setAskError] = useState<string | null>(null)
+  const [askResult, setAskResult] = useState<AiAssistResponse | null>(null)
 
   if (!workspace || !analysis || !role || !session) return null
   const data = workspace.dataset
@@ -210,12 +228,12 @@ export default function PlanReport() {
     value: finding.id,
     label: `${titleCase(finding.severity)} — ${finding.title}`,
   }))
+  const waterLimit = workspace.needsLimits.find((limit) => limit.category === 'water') ?? null
 
   const tabs = [
     { id: 'options', label: 'Options', count: data.planOptions.length },
     { id: 'decisions', label: 'Decisions', count: data.decisions.length },
     { id: 'report', label: 'Report & export' },
-    { id: 'ask', label: 'Ask your data' },
   ]
 
   const optionFields = (): FormField[] => {
@@ -254,193 +272,64 @@ export default function PlanReport() {
     }
   }
 
-  const downloadReport = () => {
-    const markdown = buildReportMarkdown({
-      workspace,
-      analysis,
-      preparedBy: session.user.displayName,
-      roleLabel: ROLE_LABELS[role],
-    })
-    downloadFile(reportFileName(workspace.activeCollege.name, analysis.asOf), markdown, 'text/markdown;charset=utf-8')
-  }
-
-  const downloadCsv = () => {
-    downloadFile(
-      `microcity-findings-${analysis.asOf.slice(0, 10)}.csv`,
-      `\uFEFF${buildFindingsCsv(analysis)}`,
-      'text/csv;charset=utf-8',
-    )
-  }
-
-  const runAiSummary = async () => {
-    setAiSummaryBusy(true)
-    setAiSummaryError(null)
-    try {
-      const result = await api.aiAssist({
-        task: 'report-summary',
-        facts: {
-          college: workspace.activeCollege.name,
-          generatedAt: analysis.asOf,
-          findings: analysis.findingCounts,
-          capacity: {
-            assessedRooms: analysis.capacity.assessedRooms,
-            unassessedRooms: analysis.capacity.unassessedRooms,
-            shortages: analysis.capacity.shortages.length,
-            overlaps: analysis.capacity.overlaps.length,
-          },
-          utilities: {
-            electricity: analysis.utilities.totals.electricity.consumption,
-            electricityUnit: analysis.utilities.totals.electricity.unit,
-            water: analysis.utilities.totals.water.consumption,
-            waterUnit: analysis.utilities.totals.water.unit,
-            spikes: analysis.utilities.spikeCount,
-            missingReadings: analysis.utilities.missingCount,
-            resets: analysis.utilities.resetCount,
-          },
-          maintenance: {
-            active: analysis.maintenance.activeCount,
-            overdueInspections: analysis.maintenance.overdueInspectionCount,
-            repeats: analysis.maintenance.repeats.length,
-          },
-          plan: {
-            options: plan.options.length,
-            approved: plan.approvalCounts.approved,
-            undecided: plan.approvalCounts.none,
-            unaddressedHighFindings: plan.unaddressedFindings.length,
-          },
-          topFindings: analysis.findings.slice(0, 8).map((finding) => ({
-            severity: finding.severity,
-            title: finding.title,
-            summary: finding.summary,
-            evidence: finding.evidence,
-            limitations: finding.limitations,
-          })),
-          note: 'Summarise only the supplied computed facts. Do not invent causes, costs or recommendations.',
-        },
-      })
-      if (result.ok && result.text) setAiSummary(result.text)
-      else setAiSummaryError(result.error ?? 'No summary was returned.')
-    } catch (err) {
-      setAiSummaryError(err instanceof ApiError ? err.message : 'The assistant could not be reached.')
-    } finally {
-      setAiSummaryBusy(false)
-    }
+  const reportInput = {
+    workspace,
+    analysis,
+    preparedBy: session.user.displayName,
+    roleLabel: ROLE_LABELS[role],
   }
 
   /**
-   * Rule-based keyword search used when AI is unavailable or fails. It is
-   * deliberately labelled "not AI" and only returns recorded facts.
+   * Five-line summary: AI version through the server number guard when
+   * configured; otherwise the deterministic rule-based summary (labelled as
+   * not AI) that buildReportMarkdown produces on its own.
    */
-  const runFallback = (text: string) => {
-    const stop = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'what', 'which', 'how', 'are', 'was', 'were', 'from', 'into', 'does', 'did', 'has', 'have', 'our', 'you', 'your', 'about', 'show', 'any'])
-    const tokens = text.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 2 && !stop.has(token))
-    if (tokens.length === 0) {
-      setAskResult({ kind: 'none', text: 'Enter at least one keyword, for example “room 1.01”, “water spike” or “boiler”.' })
-      return
+  const ensureSummary = async (): Promise<ReportSummary | null> => {
+    if (summary) return summary
+    if (!ai?.configured || !canEdit) return null
+    setSummaryBusy(true)
+    setSummaryNote(null)
+    try {
+      const result = await api.aiAssist({ task: 'report-summary', facts: buildReportFacts(reportInput) })
+      if (result.ok && result.accepted && result.text) {
+        const lines = result.text
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+        const built: ReportSummary = {
+          label: result.label ?? 'AI-generated, please verify',
+          source: 'ai',
+          lines,
+        }
+        setSummary(built)
+        return built
+      }
+      if (result.ok && result.accepted === false) {
+        setSummaryNote('AI summary rejected: unsupported number. Using the rule-based summary.')
+      } else {
+        setSummaryNote(result.error ?? 'The assistant did not return a summary. Using the rule-based summary.')
+      }
+    } catch {
+      setSummaryNote('The assistant could not be reached. Using the rule-based summary.')
+    } finally {
+      setSummaryBusy(false)
     }
-    const scored: { score: number; label: string; detail: string }[] = []
-    const scoreText = (haystack: string) => tokens.reduce((total, token) => (haystack.toLowerCase().includes(token) ? total + 1 : total), 0)
-    for (const finding of analysis.findings) {
-      const score = scoreText([finding.title, finding.summary, ...finding.evidence].join(' '))
-      if (score > 0) scored.push({ score, label: `[${titleCase(finding.severity)} finding] ${finding.title}`, detail: finding.summary })
-    }
-    for (const option of plan.options) {
-      const score = scoreText([option.title, option.description, option.assumptions, option.risks].join(' '))
-      if (score > 0) scored.push({ score, label: `[Plan option] ${option.title}`, detail: `${option.description} Net annual benefit: ${money(option.netAnnualBenefit)}; decision: ${option.decision ? titleCase(option.decision.status) : 'none recorded'}.` })
-    }
-    for (const room of analysis.capacity.rooms) {
-      const score = scoreText([room.code, room.name, room.buildingName].join(' '))
-      if (score > 0) scored.push({ score, label: `[Room] ${room.code} — ${room.name || room.buildingName}`, detail: `Score ${room.score ?? 'not available'}, status ${titleCase(room.status)}; peak demand ${room.expectedPeak ?? 'not recorded'} against capacity ${room.capacity ?? 'not recorded'}.` })
-    }
-    for (const meter of analysis.utilities.meters) {
-      const score = scoreText([meter.meter.label, meter.buildingName, meter.meter.utility].join(' '))
-      if (score > 0) scored.push({ score, label: `[Meter] ${meter.meter.label}`, detail: `Known consumption ${meter.knownConsumption} ${meter.meter.unit}; ${meter.missingReadings} missing reading(s); ${meter.spikes.length} flagged spike(s).` })
-    }
-    const top = scored.sort((a, b) => b.score - a.score).slice(0, 6)
-    if (top.length === 0) {
-      setAskResult({ kind: 'none', text: 'No recorded finding, option, room or meter matched those keywords. Try a room code, a meter name or a category such as “water”, “capacity” or “inspection”.' })
-    } else {
-      setAskResult({
-        kind: 'fallback',
-        text: top.map((entry) => `${entry.label}\n${entry.detail}`).join('\n\n'),
-      })
-    }
+    return null
   }
 
-  const ask = async () => {
-    if (!question.trim()) return
-    setAskBusy(true)
-    setAskError(null)
-    setAskResult(null)
-    try {
-      if (ai?.configured) {
-        const result = await api.aiAssist({
-          task: 'ask-data',
-          question: question.trim(),
-          facts: {
-            college: workspace.activeCollege.name,
-            generatedAt: analysis.asOf,
-            findingCounts: analysis.findingCounts,
-            topFindings: analysis.findings.slice(0, 20).map((finding) => ({
-              severity: finding.severity,
-              title: finding.title,
-              summary: finding.summary,
-              evidence: finding.evidence,
-              limitations: finding.limitations,
-            })),
-            rooms: analysis.capacity.rooms.map((room) => ({
-              code: room.code,
-              name: room.name,
-              building: room.buildingName,
-              capacity: room.capacity,
-              expectedPeak: room.expectedPeak,
-              shortageSlots: room.shortageSlots,
-              utilisation: room.averageUtilisation,
-              score: room.score,
-              status: room.status,
-              missingInputs: room.missingInputs,
-            })),
-            meters: analysis.utilities.meters.map((meter) => ({
-              label: meter.meter.label,
-              utility: meter.meter.utility,
-              unit: meter.meter.unit,
-              knownConsumption: meter.knownConsumption,
-              missingReadings: meter.missingReadings,
-              spikes: meter.spikes,
-              quality: meter.quality,
-            })),
-            planOptions: plan.options.map((option) => ({
-              title: option.title,
-              description: option.description,
-              capitalCost: option.capitalCost,
-              annualCost: option.annualCost,
-              annualSavings: option.annualSavings,
-              netAnnualBenefit: option.netAnnualBenefit,
-              decision: option.decision?.status ?? 'none',
-              assumptions: option.assumptions,
-              risks: option.risks,
-            })),
-            note: 'Answer only from these facts. Missing values are unavailable, not zero. You cannot perform actions.',
-          },
-        })
-        if (result.ok && result.text) setAskResult({ kind: 'ai', text: result.text })
-        else {
-          setAskError(result.error ?? 'The assistant did not return an answer.')
-          runFallback(question)
-        }
-      } else {
-        runFallback(question)
-      }
-    } catch (err) {
-      setAskError(
-        err instanceof ApiError
-          ? `${err.message} A rule-based keyword search is shown instead.`
-          : 'The assistant could not be reached. A rule-based keyword search is shown instead.',
-      )
-      runFallback(question)
-    } finally {
-      setAskBusy(false)
-    }
+  const downloadReport = async () => {
+    const usedSummary = await ensureSummary()
+    const markdown = buildReportMarkdown({ ...reportInput, summary: usedSummary })
+    downloadFile(reportFileName(workspace.activeCollege.name, analysis.asOf), markdown, 'text/markdown;charset=utf-8')
+  }
+
+  const downloadCsv = async () => {
+    const usedSummary = await ensureSummary()
+    downloadFile(
+      reportFileName(workspace.activeCollege.name, analysis.asOf).replace(/\.md$/, '.csv'),
+      `\uFEFF${buildReportCsv({ ...reportInput, summary: usedSummary })}`,
+      'text/csv;charset=utf-8',
+    )
   }
 
   const findingFor = (id: string) => analysis.findings.find((finding) => finding.id === id) ?? null
@@ -453,8 +342,24 @@ export default function PlanReport() {
   }
 
   const reportMarkdown = tab === 'report'
-    ? buildReportMarkdown({ workspace, analysis, preparedBy: session.user.displayName, roleLabel: ROLE_LABELS[role] })
+    ? buildReportMarkdown({ ...reportInput, summary: summary ?? undefined })
     : ''
+
+  const runLookup = async (question: string, lookupId?: string) => {
+    setAskBusy(true)
+    setAskError(null)
+    try {
+      const result = lookupId
+        ? await api.dataLookup(lookupId)
+        : await api.aiAssist({ task: 'ask-data', question })
+      setAskResult(result)
+      if (!result.ok) setAskError(result.error ?? 'The lookup could not run.')
+    } catch (err) {
+      setAskError(err instanceof ApiError ? err.message : 'The lookup could not run.')
+    } finally {
+      setAskBusy(false)
+    }
+  }
 
   return (
     <div>
@@ -466,7 +371,7 @@ export default function PlanReport() {
 
       <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Options recorded" value={data.planOptions.length} detail={`${plan.approvalCounts.approved} approved · ${plan.approvalCounts.proposed} proposed`} />
-        <Stat label="Awaiting a decision" value={plan.approvalCounts.none} detail="Options with no recorded decision" tone={plan.approvalCounts.none > 0 ? 'high' : 'default'} />
+        <Stat label="Awaiting a decision" value={plan.approvalCounts.none + plan.approvalCounts.proposed} detail="No decision yet, including proposals awaiting approval" tone={plan.approvalCounts.none + plan.approvalCounts.proposed > 0 ? 'high' : 'default'} />
         <Stat label="Unaddressed priorities" value={plan.unaddressedFindings.length} detail="Critical or high findings not linked to an option" tone={plan.unaddressedFindings.length > 0 ? 'critical' : 'good'} />
         <Stat label="Findings in report" value={analysis.findings.length} detail={`${analysis.findingCounts.critical} critical · ${analysis.findingCounts.high} high`} />
       </div>
@@ -501,6 +406,41 @@ export default function PlanReport() {
             <div className="space-y-4">
               {!canEdit && (
                 <Notice tone="info">Your role can read the plan but not change options or decisions.</Notice>
+              )}
+              {plan.options.length > 0 && (
+                <div className="overflow-x-auto border border-violet/25 bg-ink/40">
+                  <table className="w-full min-w-[46rem] border-collapse text-left text-sm">
+                    <caption className="px-4 pt-4 text-left font-mono text-[0.625rem] uppercase tracking-widest text-gold">
+                      Options comparison — costs and effects are Illustrative recorded inputs, not predictions
+                    </caption>
+                    <thead>
+                      <tr className="border-b border-violet/25 font-mono text-[0.625rem] uppercase tracking-wider text-ivory/50">
+                        <th scope="col" className="px-4 py-3 font-normal">Option</th>
+                        <th scope="col" className="px-4 py-3 font-normal">Type</th>
+                        <th scope="col" className="px-4 py-3 text-right font-normal">Capital cost</th>
+                        <th scope="col" className="px-4 py-3 text-right font-normal">Net annual benefit</th>
+                        <th scope="col" className="px-4 py-3 text-right font-normal">Payback</th>
+                        <th scope="col" className="px-4 py-3 text-right font-normal">Seat effect</th>
+                        <th scope="col" className="px-4 py-3 font-normal">Decision</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {plan.options.map((option) => (
+                        <tr key={option.optionId} className="border-b border-violet/15 last:border-0">
+                          <th scope="row" className="px-4 py-3 font-medium text-ivory">{option.title}</th>
+                          <td className="px-4 py-3 text-ivory/65">{titleCase(option.optionType)}</td>
+                          <td className="px-4 py-3 text-right font-mono text-ivory/80">{option.capitalCost === null ? 'Missing' : money(option.capitalCost)}</td>
+                          <td className="px-4 py-3 text-right font-mono text-ivory/80">{option.netAnnualBenefit === null ? 'Missing' : money(option.netAnnualBenefit)}</td>
+                          <td className="px-4 py-3 text-right font-mono text-ivory/80">{option.simplePaybackMonths === null ? 'Missing' : `${option.simplePaybackMonths.toFixed(1)} mo`}</td>
+                          <td className="px-4 py-3 text-right font-mono text-ivory/80">{option.seatEffect === null ? 'Missing' : `${option.seatEffect}${option.seatEffectComplete ? '' : ' (partial)'}`}</td>
+                          <td className="px-4 py-3">
+                            {option.decision ? <StatusBadge status={option.decision.status} /> : <Badge tone="gold">No decision</Badge>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
               {plan.options.length === 0 ? (
                 <EmptyPanel title="No options recorded">Record options with their costs, effects, assumptions, risks and evidence.</EmptyPanel>
@@ -666,164 +606,232 @@ export default function PlanReport() {
           )}
 
           {tab === 'report' && (
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-              <div className="space-y-4">
-                <p className="text-sm leading-relaxed text-ivory/65">
-                  The report is built from recorded data and the same figures shown in this workspace. It explains how
-                  each figure was worked out, what is missing and what the records cannot show. Nothing is rounded into
-                  false certainty.
-                </p>
-                <dl className="space-y-2 text-sm">
-                  <div className="flex justify-between gap-3 border-b border-violet/15 pb-1.5">
-                    <dt className="text-ivory/55">College</dt><dd className="text-right text-ivory">{workspace.activeCollege.name}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3 border-b border-violet/15 pb-1.5">
-                    <dt className="text-ivory/55">Prepared by</dt><dd className="text-right text-ivory">{session.user.displayName} ({ROLE_LABELS[role]})</dd>
-                  </div>
-                  <div className="flex justify-between gap-3 border-b border-violet/15 pb-1.5">
-                    <dt className="text-ivory/55">Analysis time</dt><dd className="text-right text-ivory">{formatDateTime(analysis.asOf)}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-ivory/55">Data source</dt><dd className="text-right text-ivory">{workspace.provenance.name}</dd>
-                  </div>
-                </dl>
-                <div className="flex flex-wrap gap-3">
-                  <button type="button" onClick={downloadReport} className="rounded-md bg-violet px-4 py-2 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring">
-                    Download Markdown report
-                  </button>
-                  <button type="button" onClick={downloadCsv} className="rounded-md border border-violet/40 px-4 py-2 text-sm text-ivory/80 hover:bg-violet/15 focus-ring">
-                    Download findings CSV
-                  </button>
-                </div>
-                <Notice tone="info">
-                  Exports are point-in-time. Later record changes are not reflected until a new export is generated.
-                </Notice>
-              </div>
-              <div className="border border-gold/50 bg-gold/5 p-4">
-                <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Optional AI executive summary</p>
-                {!ai?.configured ? (
-                  <p className="mt-2 text-sm leading-relaxed text-ivory/60">
-                    AI is not configured on this server. The full report is generated without it; no summary will be
-                    written and no data leaves the server.
+            <div className="space-y-6">
+              {canEdit && (
+                <Panel kicker="Ask your data" title="One question, one stored lookup">
+                  {ai?.configured && !askError ? (
+                    <form
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        if (askQuestion.trim()) void runLookup(askQuestion.trim())
+                      }}
+                      className="flex flex-wrap items-end gap-3"
+                    >
+                      <label className="min-w-0 flex-1 text-xs text-ivory/70">
+                        <span className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Your question</span>
+                        <input
+                          value={askQuestion}
+                          onChange={(event) => setAskQuestion(event.target.value)}
+                          placeholder="e.g. Which rooms are over capacity?"
+                          className="mt-1 min-h-11 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
+                        />
+                      </label>
+                      <button
+                        type="submit"
+                        disabled={askBusy || !askQuestion.trim()}
+                        className="min-h-11 rounded-md bg-violet px-4 py-2 text-sm font-semibold text-ivory hover:bg-violet/85 disabled:opacity-40 focus-ring"
+                      >
+                        {askBusy ? 'Looking up…' : 'Ask'}
+                      </button>
+                    </form>
+                  ) : (
+                    <div>
+                      <p className="text-sm text-ivory/70">
+                        {ai?.configured
+                          ? 'The AI request failed. Use a button to run the same stored lookup without AI.'
+                          : 'AI is not configured, so there is no question box. These buttons run the same stored lookups directly.'}{' '}
+                        The server computes every answer from college records.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {LOOKUP_BUTTONS.map((button) => (
+                          <button
+                            key={button.id}
+                            type="button"
+                            disabled={askBusy}
+                            onClick={() => void runLookup(button.label, button.id)}
+                            className="min-h-11 rounded-md border border-violet/40 px-3 py-2 text-sm text-ivory/85 hover:bg-violet/15 disabled:opacity-40 focus-ring"
+                          >
+                            {button.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <p className="mt-3 border-t border-violet/25 pt-3 text-xs leading-relaxed text-ivory/55">
+                    The assistant never writes the answer and never sees the data: it only maps the question to one
+                    fixed lookup, and the server computes the result from records.
                   </p>
-                ) : (
-                  <>
-                    <p className="mt-2 text-sm leading-relaxed text-ivory/60">
-                      The configured provider receives only the figures and notes shown in the report — no raw records —
-                      and returns a written summary. It cannot change the report.
-                    </p>
+                  {askError && <div className="mt-3"><Notice tone="danger">{askError}</Notice></div>}
+                  {askResult && (
+                    <div className="mt-4 border-t border-violet/25 pt-3">
+                      {askResult.mapped ? (
+                        <div>
+                          <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">{askResult.label}</p>
+                          <h4 className="mt-2 font-heading text-lg text-ivory">{askResult.title}</h4>
+                          {(askResult.items ?? []).length === 0 ? (
+                            <p className="mt-2 text-sm text-ivory/65">No records match this lookup right now.</p>
+                          ) : (
+                            <ul className="mt-2 divide-y divide-violet/15">
+                              {(askResult.items ?? []).map((item, index) => (
+                                <li key={index} className="flex flex-wrap items-baseline justify-between gap-2 py-2">
+                                  <span className="text-sm font-medium text-ivory">{item.label}</span>
+                                  <span className="flex min-w-0 items-center gap-2">
+                                    <span className="text-xs text-ivory/60">{item.detail}</span>
+                                    <Badge tone="outline">{item.tag}</Badge>
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {askResult.note && <p className="mt-2 text-xs text-ivory/50">{askResult.note}</p>}
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="text-sm font-semibold text-ivory">{askResult.message}</p>
+                          <p className="mt-2 text-xs text-ivory/55">Questions I can answer:</p>
+                          <ul className="mt-1 list-inside list-disc text-sm text-ivory/75">
+                            {(askResult.supported ?? []).map((item) => (
+                              <li key={item}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Panel>
+              )}
+              <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+                <div className="space-y-4">
+                  <p className="text-sm leading-relaxed text-ivory/65">
+                    The report is built from recorded data and the same figures shown in this workspace. Every figure
+                    carries a tag — Measured, Estimated, Illustrative or Missing — so a reader can see how it was
+                    obtained. Missing values are written as Missing, never as 0.
+                  </p>
+                  <dl className="space-y-2 text-sm">
+                    <div className="flex justify-between gap-3 border-b border-violet/15 pb-1.5">
+                      <dt className="text-ivory/55">College</dt><dd className="text-right text-ivory">{workspace.activeCollege.name}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3 border-b border-violet/15 pb-1.5">
+                      <dt className="text-ivory/55">Prepared by</dt><dd className="text-right text-ivory">{session.user.displayName} ({ROLE_LABELS[role]})</dd>
+                    </div>
+                    <div className="flex justify-between gap-3 border-b border-violet/15 pb-1.5">
+                      <dt className="text-ivory/55">Analysis time</dt><dd className="text-right text-ivory">{formatDateTime(analysis.asOf)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-ivory/55">Data source</dt><dd className="text-right text-ivory">{workspace.provenance.name}</dd>
+                    </div>
+                  </dl>
+                  <div className="flex flex-wrap gap-3">
+                    <button type="button" onClick={() => void downloadReport()} className="rounded-md bg-violet px-4 py-2 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring">
+                      Download Markdown report
+                    </button>
+                    <button type="button" onClick={() => void downloadCsv()} className="rounded-md border border-violet/40 px-4 py-2 text-sm text-ivory/80 hover:bg-violet/15 focus-ring">
+                      Download CSV report
+                    </button>
                     <button
                       type="button"
-                      onClick={() => void runAiSummary()}
-                      disabled={aiSummaryBusy}
-                      className="mt-3 rounded-md border border-gold/60 px-3 py-1.5 text-xs font-semibold text-gold hover:bg-gold/10 focus-ring disabled:opacity-50"
+                      onClick={async () => {
+                        const usedSummary = await ensureSummary()
+                        setSummary(usedSummary)
+                        setPrintView(true)
+                        setTimeout(() => window.print(), 150)
+                      }}
+                      className="rounded-md border border-violet/40 px-4 py-2 text-sm text-ivory/80 hover:bg-violet/15 focus-ring"
                     >
-                      {aiSummaryBusy ? 'Generating…' : aiSummary ? 'Regenerate summary' : 'Generate summary (optional)'}
+                      Print view
                     </button>
-                    {aiSummaryError && <p className="mt-2 text-xs text-status-error-dark">{aiSummaryError}</p>}
-                  </>
-                )}
-                {aiSummary && (
-                  <div className="mt-4 border border-gold/50 bg-ink/60 p-3">
-                    <p className="flex items-center gap-2 font-mono text-[0.625rem] uppercase tracking-widest text-gold">
-                      <span aria-hidden="true">◆</span> AI-generated — please verify
-                    </p>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ivory/80">{aiSummary}</p>
-                    <p className="mt-2 text-[0.625rem] text-ivory/40">Model: {ai?.model ?? 'configured provider'}</p>
+                    {printView && (
+                      <button type="button" onClick={() => setPrintView(false)} className="rounded-md border border-violet/40 px-4 py-2 text-sm text-ivory/80 hover:bg-violet/15 focus-ring">
+                        Hide print view
+                      </button>
+                    )}
                   </div>
-                )}
-              </div>
-              <div className="xl:col-span-2">
-                <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Report preview</p>
-                <pre className="mt-2 max-h-96 overflow-auto border border-violet/30 bg-ink p-4 font-mono text-[0.6875rem] leading-relaxed text-ivory/65">
-                  {reportMarkdown}
-                </pre>
-              </div>
-            </div>
-          )}
-
-          {tab === 'ask' && (
-            <div className="space-y-5">
-              <div>
-                <p className="text-sm leading-relaxed text-ivory/65">
-                  Ask about the findings, options and recorded observations. {ai?.configured
-                    ? 'The configured provider answers only from the facts supplied with the question.'
-                    : 'AI is not configured, so a rule-based keyword search is used instead. It is not AI.'}
-                </p>
-                <label htmlFor="ask-question" className="mt-4 block font-mono text-[0.625rem] uppercase tracking-widest text-gold">
-                  Your question
-                </label>
-                <div className="mt-1 flex flex-col gap-2 sm:flex-row">
-                  <input
-                    id="ask-question"
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    placeholder="e.g. Which rooms have a capacity shortfall?"
-                    className={inputClass}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void ask()
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void ask()}
-                    disabled={askBusy || !question.trim()}
-                    className="shrink-0 rounded-md bg-violet px-4 py-2 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring disabled:opacity-50"
-                  >
-                    {askBusy ? 'Asking…' : 'Ask'}
-                  </button>
-                </div>
-                <p className="mt-2 text-xs text-ivory/45">
-                  Examples: “water spikes”, “room 1.01”, “overdue inspections”, “boiler”, “what is unaddressed?”
-                </p>
-              </div>
-
-              {askError && <Notice tone="warning">{askError}</Notice>}
-
-              {askResult && (
-                <div className={`border p-4 ${askResult.kind === 'ai' ? 'border-gold/60 bg-gold/5' : 'border-violet/40 bg-ink/60'}`}>
-                  <p className={`flex items-center gap-2 font-mono text-[0.625rem] uppercase tracking-widest ${askResult.kind === 'ai' ? 'text-gold' : 'text-violet-bright'}`}>
-                    <span aria-hidden="true">{askResult.kind === 'ai' ? '◆' : '■'}</span>
-                    {askResult.kind === 'ai'
-                      ? 'AI-generated — please verify'
-                      : askResult.kind === 'fallback'
-                        ? 'Rule-based keyword search — not AI'
-                        : 'No recorded match'}
-                  </p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ivory/80">{askResult.text}</p>
-                  {askResult.kind === 'ai' && (
-                    <p className="mt-2 text-[0.625rem] text-ivory/40">
-                      Model: {ai?.model ?? 'configured provider'} · cannot change records or approve decisions
-                    </p>
-                  )}
-                  {askResult.kind === 'fallback' && (
-                    <p className="mt-2 text-[0.625rem] text-ivory/40">
-                      Matched recorded text only. No generation, inference or advice is involved.
-                    </p>
+                  <Notice tone="info">
+                    Exports are point-in-time. Later record changes are not reflected until a new export is generated.
+                  </Notice>
+                  {ai?.configured && canEdit && (
+                    <div className="border border-gold/40 bg-gold/5 p-4">
+                      <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Five-line summary</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSummary(null)
+                          void ensureSummary()
+                        }}
+                        disabled={summaryBusy}
+                        className="mt-2 min-h-11 w-full rounded-md border border-gold/60 px-4 py-2 text-sm font-semibold text-gold hover:bg-gold/10 disabled:opacity-40 focus-ring"
+                      >
+                        {summaryBusy ? 'Writing…' : summary ? 'Write summary again (AI)' : 'Write summary (AI)'}
+                      </button>
+                      <p className="mt-2 text-xs leading-relaxed text-ivory/55">
+                        The server sends the computed report facts through the number guard; any answer with a number
+                        the facts do not support is rejected and the rule-based summary is used instead.
+                      </p>
+                      {summaryNote && <p className="mt-2 text-xs text-status-error-dark">{summaryNote}</p>}
+                      {summary && (
+                        <div className="mt-3 border-t border-violet/25 pt-3">
+                          <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">{summary.label}</p>
+                          <ul className="mt-2 space-y-1 text-sm leading-relaxed text-ivory/80">
+                            {summary.lines.map((line, index) => (
+                              <li key={index}>{line}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
+                <div className="space-y-4">
+                  <div className="border border-violet/30 bg-ink/40 p-4">
+                    <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Figure tags</p>
+                    <ul className="mt-3 grid gap-2 text-xs leading-relaxed text-ivory/65 sm:grid-cols-2">
+                      <li><Badge tone="ok">Measured</Badge> Recorded values or counts of records.</li>
+                      <li><Badge tone="violet">Estimated</Badge> Calculated from a recorded tariff or an estimation step.</li>
+                      <li><Badge tone="gold">Illustrative</Badge> An entered plan input, not a prediction.</li>
+                      <li><Badge tone="outline">Missing</Badge> No record exists; nothing was assumed.</li>
+                    </ul>
+                  </div>
+                  <div className="border border-violet/30 bg-ink/40 p-4">
+                    <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Thresholds and sources</p>
+                    {waterLimit ? (
+                      <div className="mt-2 space-y-1 text-sm text-ivory/70">
+                        <p>
+                          Water limit: <span className="font-mono text-ivory">{waterLimit.limit} {waterLimit.unit}</span> per water meter per month.
+                        </p>
+                        <p>Type: <span className="text-ivory">{THRESHOLD_KIND_LABELS[waterLimit.kind]}</span></p>
+                        <p>Source: <span className="text-ivory">{waterLimit.source}</span></p>
+                        <p className="text-xs text-ivory/45">Recorded by {waterLimit.updatedByName} on {formatDateTime(waterLimit.updatedAt)}.</p>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-ivory/65">
+                        No Water limit is recorded, so the Water needs row reports Not enough data. No default value is supplied.
+                      </p>
+                    )}
+                    <p className="mt-3 border-t border-violet/20 pt-3 text-xs leading-relaxed text-ivory/55">
+                      Lighting, Waste and Parking have no rule in this build that takes a limit, so no limit is recorded
+                      for them.
+                    </p>
+                  </div>
+                </div>
+                <div className="min-w-0 xl:col-span-2">
+                  <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Report preview</p>
+                  <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words border border-violet/30 bg-ink p-4 font-mono text-[0.6875rem] leading-relaxed text-ivory/65">
+                    {reportMarkdown}
+                  </pre>
+                </div>
+              </div>
+              {printView && (
+                <PrintReport
+                  workspace={workspace}
+                  analysis={analysis}
+                  preparedBy={session.user.displayName}
+                  roleLabel={ROLE_LABELS[role]}
+                  summary={summary}
+                />
               )}
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Panel kicker="Grounding" title="What the assistant can see">
-                  <ul className="space-y-2 text-xs leading-relaxed text-ivory/60">
-                    <li>• Finding counts, supporting evidence and limitations.</li>
-                    <li>• Room capacity, scores and missing inputs.</li>
-                    <li>• Meter consumption, missing readings and flags.</li>
-                    <li>• Recorded plan options, costs, assumptions and decisions.</li>
-                  </ul>
-                </Panel>
-                <Panel kicker="Guardrails" title="What it cannot do">
-                  <ul className="space-y-2 text-xs leading-relaxed text-ivory/60">
-                    <li>• Create, edit or delete any record.</li>
-                    <li>• Approve, reject or defer a decision.</li>
-                    <li>• Recalculate a score or invent a missing value.</li>
-                    <li>• Access another college's data.</li>
-                  </ul>
-                </Panel>
-              </div>
             </div>
           )}
+
         </div>
       </Panel>
 

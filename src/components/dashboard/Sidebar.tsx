@@ -1,7 +1,12 @@
 import { NavLink } from 'react-router-dom'
-import { dashboardNavFor } from './nav'
+import { dashboardNavFor, dashboardSecondaryNavFor } from './nav'
 import { useAuth } from '../../auth/auth-context'
 import { ROLE_LABELS } from '../../domain/types'
+
+const SECONDARY_LABELS: Record<string, string> = {
+  '/dashboard/inventory': 'Records',
+  '/dashboard/help': 'Profile and Help',
+}
 
 interface SidebarProps {
   className?: string
@@ -12,6 +17,7 @@ interface SidebarProps {
 export default function Sidebar({ className = '', variant = 'fixed', onClose }: SidebarProps) {
   const { role, workspace, session } = useAuth()
   const items = dashboardNavFor(role)
+  const secondary = dashboardSecondaryNavFor(role)
   const college = workspace?.activeCollege
 
   return (
@@ -60,7 +66,7 @@ export default function Sidebar({ className = '', variant = 'fixed', onClose }: 
         <div className="mt-5 border-t border-violet/30" aria-hidden="true" />
       </div>
 
-      <nav className="flex-1 pb-6">
+      <nav className="flex-1 pb-4">
         <ul className="space-y-1 px-3">
           {items.map((item, i) => (
             <li key={item.path}>
@@ -87,11 +93,33 @@ export default function Sidebar({ className = '', variant = 'fixed', onClose }: 
             </li>
           ))}
         </ul>
+
+        {secondary.length > 0 && (
+          <ul className="mt-5 space-y-0.5 border-t border-violet/20 px-3 pt-4">
+            {secondary.map((item) => (
+              <li key={item.path}>
+                <NavLink
+                  to={item.path}
+                  title={item.hint}
+                  className={({ isActive }) =>
+                    `block border-l-2 py-2 pl-4 pr-3 text-xs tracking-wide transition-colors focus-ring ${
+                      isActive
+                        ? 'border-violet text-ivory'
+                        : 'border-transparent text-ivory/45 hover:bg-violet/10 hover:text-ivory/80'
+                    }`
+                  }
+                >
+                  {SECONDARY_LABELS[item.path] ?? item.label}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        )}
       </nav>
 
       <div className="border-t border-violet/30 px-6 py-5">
         <p className="text-xs leading-relaxed text-ivory/50">
-          Records belong to the selected college. Imported rows are labelled by source file in the Data Centre.
+          Records belong to the selected college. Missing values are shown as missing, never as zero.
         </p>
         {session && (
           <p className="mt-3 truncate border-t border-violet/20 pt-3 font-mono text-[0.6875rem] text-ivory/40">

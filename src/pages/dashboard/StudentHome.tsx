@@ -113,8 +113,8 @@ export default function StudentHome() {
         )}
 
         <p className="mt-3 flex flex-wrap items-center gap-2 text-xs text-ivory/50">
-          <Badge tone="outline">Shared</Badge>
-          Public infrastructure issues are visible to every college.
+          <Badge tone="outline">College-scoped</Badge>
+          Public infrastructure issues are visible inside this college only.
         </p>
       </section>
     </div>

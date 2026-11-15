@@ -74,6 +74,7 @@ function dataset(): DatasetSources {
     complaintUpdates: campus(SEED_COMPLAINT_UPDATES),
     planOptions: campus(SEED_PLAN_OPTIONS),
     decisions: campus(SEED_DECISIONS),
+    nearbyAssets: [],
     urbanAssets: SEED_URBAN_ASSETS,
     urbanIssues: SEED_URBAN_ISSUES,
   }
@@ -125,7 +126,8 @@ test('capacity: seat shortfalls, missing capacity and overlaps are evidence-base
 
 test('utilities: interval, cumulative, missing values, resets, spikes and cost estimates', () => {
   const data = dataset()
-  const utilities = analyseUtilities(data.utilityMeters, data.utilityReadings, data.tariffs, data.buildings)
+  const estimatedMeters = data.utilityMeters.map((meter) => meter.id === 'mtr-bv-main-w1' ? { ...meter, measurementType: 'estimated' as const } : meter)
+  const utilities = analyseUtilities(estimatedMeters, data.utilityReadings, data.tariffs, data.buildings)
 
   const electricity = utilities.meters.find((meter) => meter.meter.id === 'mtr-bv-main-e1')
   assert.ok(electricity)
@@ -145,7 +147,8 @@ test('utilities: interval, cumulative, missing values, resets, spikes and cost e
   assert.equal(water.periods.find((period) => period.readingId === 'rea-bv-w-10')?.kind, 'reset')
   assert.equal(water.periods.find((period) => period.readingId === 'rea-bv-w-10')?.consumption, null)
   assert.equal(water.resets.length, 1)
-  assert.ok(water.spikes.some((spike) => spike.readingId === 'rea-bv-w-08'))
+  assert.equal(water.measurementType, 'estimated')
+  assert.equal(water.spikes.length, 0, 'Estimated readings cannot produce a leak prompt')
   assert.ok(water.periods.every((period) => period.consumption === null || period.consumption >= 0))
 
   const workshop = utilities.meters.find((meter) => meter.meter.id === 'mtr-bv-ws-e1')
@@ -156,7 +159,7 @@ test('utilities: interval, cumulative, missing values, resets, spikes and cost e
   assert.equal(utilities.totals.electricity.unit, 'kWh')
   assert.equal(utilities.totals.electricity.currency, 'INR')
   assert.ok((utilities.totals.electricity.consumption ?? 0) > 0)
-  assert.equal(utilities.spikeCount, 2)
+  assert.equal(utilities.spikeCount, 1, 'only the Measured electricity series is spike-tested')
   assert.equal(utilities.resetCount, 1)
   assert.ok(SPIKE_RULE.minimumPeriods >= 4)
 })
@@ -265,7 +268,7 @@ test('workspace analysis is deterministic, sorted and free of duplicate finding 
     assert.ok(rank[first.findings[index - 1].severity] <= rank[first.findings[index].severity])
   }
   assert.ok(first.capacity.shortages.length >= 2)
-  assert.ok(first.utilities.spikeCount >= 2)
+  assert.ok(first.utilities.spikeCount >= 1)
   assert.ok(first.maintenance.ranked.length >= 5)
   assert.ok(first.plan.options.length === 3)
 })

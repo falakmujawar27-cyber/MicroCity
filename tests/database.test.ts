@@ -60,7 +60,7 @@ test('fresh database: seeding and localisation complete on a new file', () => {
         }
       }
 
-      assert.equal(db.listImportLogs('clg-bv').filter((row) => row.kind === 'seed').length, 1)
+      assert.equal(db.listImportLogs('clg-bv').filter((row) => row.kind === 'seed').length, 2)
       assert.equal(db.listImportLogs('clg-fd').filter((row) => row.kind === 'seed').length, 1)
       buildingCount = db.countEntity('buildings', 'clg-bv')
     } finally {
@@ -73,7 +73,9 @@ test('fresh database: seeding and localisation complete on a new file', () => {
       assert.equal(reopened.listColleges().length, 2)
       assert.equal(reopened.countEntity('buildings', 'clg-bv'), buildingCount)
       assert.equal(reopened.getMeta('localisation'), MARKER)
-      assert.equal(reopened.listImportLogs('clg-bv').filter((row) => row.kind === 'seed').length, 1)
+      assert.equal(reopened.listImportLogs('clg-bv').filter((row) => row.kind === 'seed').length, 2)
+      assert.equal(reopened.countEntity('nearbyAssets', 'clg-bv'), 3)
+      assert.equal(reopened.countEntity('nearbyAssets', 'clg-fd'), 0)
     } finally {
       reopened.close()
     }

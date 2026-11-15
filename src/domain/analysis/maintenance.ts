@@ -13,11 +13,13 @@ import type {
   Complaint,
   ComplaintStatus,
   Inspection,
+  PriorityWeights,
   Room,
   Severity,
   UrbanAsset,
   UrbanIssue,
 } from '../types.ts'
+import { DEFAULT_PRIORITY_WEIGHTS } from '../types.ts'
 import type { Finding, FindingSeverity } from './types.ts'
 import { formatIstDate } from '../../lib/time.ts'
 
@@ -107,18 +109,21 @@ export interface MaintenanceAnalysis {
   methods: string[]
 }
 
-const SEVERITY_BASE: Record<Severity, number> = { critical: 40, high: 25, medium: 12, low: 4 }
+const SEVERITY_RATIO: Record<Severity, number> = { critical: 1, high: 0.625, medium: 0.3, low: 0.1 }
 const STATUS_POINTS: Record<'open' | 'in_progress', number> = { open: 10, in_progress: 4 }
 
-const METHODS = [
-  'Base severity: critical 40, high 25, medium 12, low 4 points. Open adds 10; in-progress adds 4. Resolved and closed reports are not ranked.',
-  'People affected adds 1 point per 10 people, capped at 15. When the count is not recorded the component is marked unavailable and not scored.',
-  'Age adds 1 point per 3 days since the report was raised, capped at 15.',
-  `Repeat: each earlier complaint with the same room/asset target and category within ${REPEAT_WINDOW_DAYS} days adds 5 points, capped at 15. Reports without a linked target cannot be repeat-matched.`,
-  'Linked-asset risk adds 8 points for criticality "critical" and 4 for "high"; poor asset condition adds 4. Points are shown individually so they can be audited.',
-  `Bands: P1 at ${PRIORITY_BANDS.urgent}+, P2 at ${PRIORITY_BANDS.high}+, P3 at ${PRIORITY_BANDS.medium}+, otherwise P4. The score helps order the work; it is not a safety assessment or a service-level guarantee.`,
-  `Inspection alerts use recorded schedules. Overdue means the scheduled date has passed; due soon means within ${INSPECTION_DUE_SOON_DAYS} days. Interval alerts are only produced when an asset has a recorded interval and inspection history and no open scheduled inspection.`,
-]
+function methodsFor(weights: PriorityWeights): string[] {
+  const severity = (value: Severity) => Math.round(weights.severity * SEVERITY_RATIO[value])
+  return [
+    `Base severity: critical ${severity('critical')}, high ${severity('high')}, medium ${severity('medium')}, low ${severity('low')} points. Open adds 10; in-progress adds 4. Resolved and closed reports are not ranked.`,
+    `People affected adds ${weights.usersAffected} point${weights.usersAffected === 1 ? '' : 's'} per 10 people, capped at 15. When the count is not recorded the component is marked unavailable and not scored.`,
+    `Age adds ${weights.daysOpen} point${weights.daysOpen === 1 ? '' : 's'} per 3 days since the report was raised, capped at 15.`,
+    `Repeat: each earlier complaint with the same room/asset target and category within ${REPEAT_WINDOW_DAYS} days adds 5 points, capped at 15. Reports without a linked target cannot be repeat-matched.`,
+    `Linked-asset risk adds 8 points for criticality "critical" and 4 for "high"; poor asset condition adds ${weights.condition}. Points are shown individually so they can be audited.`,
+    `Bands: P1 at ${PRIORITY_BANDS.urgent}+, P2 at ${PRIORITY_BANDS.high}+, P3 at ${PRIORITY_BANDS.medium}+, otherwise P4. Weights apply to both campus and public work; the score helps order the work and is not a safety assessment or a service-level guarantee.`,
+    `Inspection alerts use recorded schedules. Overdue means the scheduled date has passed; due soon means within ${INSPECTION_DUE_SOON_DAYS} days. Interval alerts are only produced when an asset has a recorded interval and inspection history and no open scheduled inspection.`,
+  ]
+}
 
 const DAY_MS = 86_400_000
 
@@ -509,6 +514,7 @@ export function analyseMaintenance(
   urbanIssues: UrbanIssue[],
   urbanAssets: UrbanAsset[],
   asOf: string,
+  weights: PriorityWeights = DEFAULT_PRIORITY_WEIGHTS,
 ): MaintenanceAnalysis {
   const roomById = new Map(rooms.map((room) => [room.id, room]))
   const buildingById = new Map(buildings.map((building) => [building.id, building]))
@@ -532,14 +538,26 @@ export function analyseMaintenance(
     const target = targetForComplaint(complaint, roomById, buildingById, assetById)
     const repeatCount = countEarlierRepeats(complaint, complaints, keysById)
     const ageDays = daysSince(complaint.raisedAt, asOf)
-    const peoplePoints = complaint.peopleAffected === null ? 0 : Math.min(15, Math.floor(complaint.peopleAffected / 10))
-    const agePoints = Math.min(15, Math.floor(ageDays / 3))
+    const peoplePoints =
+      complaint.peopleAffected === null
+        ? 0
+        : Math.min(15, Math.floor(complaint.peopleAffected / 10) * weights.usersAffected)
+    const agePoints = Math.min(15, Math.floor(ageDays / 3) * weights.daysOpen)
     const repeatPoints = Math.min(15, repeatCount * 5)
     const asset = complaint.assetId ? assetById.get(complaint.assetId) : undefined
-    const assetPoints = asset ? (asset.criticality === 'critical' ? 8 : asset.criticality === 'high' ? 4 : 0) + (asset.condition === 'poor' ? 4 : 0) : 0
+    const assetPoints = asset
+      ? (asset.criticality === 'critical' ? 8 : asset.criticality === 'high' ? 4 : 0) +
+        (asset.condition === 'poor' ? weights.condition : 0)
+      : 0
 
     const components: PriorityComponent[] = [
-      { key: 'severity', label: 'Reported severity', points: SEVERITY_BASE[complaint.severity], available: true, detail: severityLabel(complaint.severity) },
+      {
+        key: 'severity',
+        label: 'Reported severity',
+        points: Math.round(weights.severity * SEVERITY_RATIO[complaint.severity]),
+        available: true,
+        detail: severityLabel(complaint.severity),
+      },
       {
         key: 'status',
         label: 'Status',
@@ -552,9 +570,18 @@ export function analyseMaintenance(
         label: 'People affected',
         points: peoplePoints,
         available: complaint.peopleAffected !== null,
-        detail: complaint.peopleAffected === null ? 'Not recorded - not scored' : `${complaint.peopleAffected} reported affected (1 point per 10, maximum 15)`,
+        detail:
+          complaint.peopleAffected === null
+            ? 'Not recorded - not scored'
+            : `${complaint.peopleAffected} reported affected (${weights.usersAffected} point${weights.usersAffected === 1 ? '' : 's'} per 10, maximum 15)`,
       },
-      { key: 'age', label: 'Age', points: agePoints, available: true, detail: `${ageDays} days since raised (1 point per 3 days, maximum 15)` },
+      {
+        key: 'age',
+        label: 'Age',
+        points: agePoints,
+        available: true,
+        detail: `${ageDays} days since raised (${weights.daysOpen} point${weights.daysOpen === 1 ? '' : 's'} per 3 days, maximum 15)`,
+      },
       {
         key: 'repeat',
         label: 'Repeat pattern',
@@ -755,7 +782,7 @@ export function analyseMaintenance(
     dueSoonInspectionCount: alerts.filter((alert) => alert.kind === 'due-soon' || alert.kind === 'interval-due-soon').length,
     openPublicIssues: urbanIssues.filter((issue) => issue.status === 'reported' || issue.status === 'in_progress').length,
     findings,
-    methods: METHODS,
+    methods: methodsFor(weights),
   }
 }
 

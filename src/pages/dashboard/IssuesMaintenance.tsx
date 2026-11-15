@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { NEARBY_TYPE_LABELS } from '../../domain/types'
 import PageHeading from '../../components/dashboard/PageHeading'
 import Panel from '../../components/ui/Panel'
 import Tabs from '../../components/ui/Tabs'
@@ -16,10 +18,17 @@ import { useAuth } from '../../auth/auth-context'
 import { formatDate, formatDateTime, titleCase } from '../../lib/format'
 import { COMPLAINT_CATEGORIES, ROLE_LABELS, URBAN_CATEGORY_LABELS } from '../../domain/types'
 import { COMPLAINT_DESCRIPTION_MIN } from '../../domain/complaint-rules'
-import type { Complaint } from '../../domain/types'
+import type { Complaint, UrbanIssue } from '../../domain/types'
 import type { Finding as AnalysisFinding } from '../../domain/analysis'
 
-type TabId = 'reports' | 'priority' | 'public' | 'inspections' | 'activity'
+type TabId = 'issues' | 'priority' | 'inspections' | 'activity'
+type IssueSourceFilter = 'all' | 'campus' | 'public'
+type IssueStatusFilter = 'all' | 'open' | 'in_progress' | 'resolved' | 'closed'
+type IssuePriorityFilter = 'all' | 'P1' | 'P2' | 'P3' | 'P4' | 'unranked'
+
+type IssueItem =
+  | { source: 'campus'; at: string; complaint: Complaint }
+  | { source: 'public'; at: string; issue: UrbanIssue }
 
 interface Editor {
   entity: string
@@ -55,11 +64,28 @@ const URBAN_STATUS_OPTIONS = [
   { value: 'closed', label: 'Closed' },
 ]
 
-const thClass = 'whitespace-nowrap px-3 py-2 text-left font-mono text-[0.625rem] uppercase tracking-widest text-gold/80'
-const tdClass = 'px-3 py-2.5 align-top text-sm text-ivory/75'
 const rowActionClass = 'rounded border border-violet/40 px-2 py-1 font-mono text-[0.625rem] uppercase tracking-wider text-violet-bright hover:bg-violet/15 focus-ring'
 
-function Photo({ name, dataUrl }: { name: string | null; dataUrl: string | null }) {
+function Photo({ complaint, kind }: { complaint: Complaint; kind: 'report' | 'completion' }) {
+  const has = kind === 'completion' ? complaint.hasCompletionPhoto : complaint.hasPhoto
+  if (!has) return null
+  const name = kind === 'completion' ? complaint.completionPhotoName : complaint.photoName
+  const label = kind === 'completion' ? 'After photo' : 'Attached photo'
+  return (
+    <figure className="mt-3 max-w-xs">
+      <img
+        src={api.complaintPhotoUrl(complaint.id, kind, complaint.collegeId)}
+        alt={`${label}${name ? `: ${name}` : ''}`}
+        className="border border-violet/30 object-cover"
+      />
+      <figcaption className="mt-1 font-mono text-[0.5625rem] uppercase tracking-wider text-ivory/40">
+        {label} — {name ?? 'unnamed'}
+      </figcaption>
+    </figure>
+  )
+}
+
+function PublicPhoto({ name, dataUrl }: { name: string | null; dataUrl: string | null }) {
   if (!dataUrl) return null
   return (
     <figure className="mt-3 max-w-xs">
@@ -73,11 +99,43 @@ function Photo({ name, dataUrl }: { name: string | null; dataUrl: string | null 
 
 export default function IssuesMaintenance() {
   const { workspace, analysis, refresh, can, role, session } = useAuth()
-  const [tab, setTab] = useState<TabId>('reports')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [tab, setTab] = useState<TabId>('issues')
   const [editor, setEditor] = useState<Editor | null>(null)
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
   const [explained, setExplained] = useState<AnalysisFinding | null>(null)
   const [mineOnly, setMineOnly] = useState(false)
+  const [sourceFilter, setSourceFilter] = useState<IssueSourceFilter>('all')
+  const [statusFilter, setStatusFilter] = useState<IssueStatusFilter>('all')
+  const [priorityFilter, setPriorityFilter] = useState<IssuePriorityFilter>('all')
+  const [weightsDraft, setWeightsDraft] = useState({ severity: '40', condition: '4', usersAffected: '1', daysOpen: '1' })
+  const [weightsBusy, setWeightsBusy] = useState(false)
+  const [weightsError, setWeightsError] = useState<string | null>(null)
+  const [weightsSaved, setWeightsSaved] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!workspace) return
+    setWeightsDraft({
+      severity: String(workspace.priorityWeights.severity),
+      condition: String(workspace.priorityWeights.condition),
+      usersAffected: String(workspace.priorityWeights.usersAffected),
+      daysOpen: String(workspace.priorityWeights.daysOpen),
+    })
+  }, [workspace?.priorityWeights.updatedAt])
+
+  useEffect(() => {
+    const assetId = searchParams.get('nearbyAsset')
+    if (!assetId || !workspace) return
+    const asset = workspace.dataset.nearbyAssets.find((item) => item.id === assetId)
+    if (asset) {
+      setEditor({ entity: 'urbanIssues', title: 'Report a public infrastructure issue', size: 'lg', initial: {
+        category: NEARBY_TYPE_LABELS[asset.type], severity: asset.condition === 'poor' ? 'high' : 'medium',
+        locationLabel: asset.locationDescription, authority: asset.responsibleAuthority,
+        description: `${NEARBY_TYPE_LABELS[asset.type]}: condition ${asset.condition ?? 'Not recorded'}. Distance from college gate: ${asset.distanceMetres} m (${asset.distanceBasis}). Basis: ${asset.basis}. Please review and describe the issue before saving.`,
+      } })
+    }
+    setSearchParams({}, { replace: true })
+  }, [searchParams, workspace, setSearchParams])
 
   if (!workspace || !analysis || !role || !session) return null
   const data = workspace.dataset
@@ -115,10 +173,28 @@ export default function IssuesMaintenance() {
   const publicIssues = [...data.urbanIssues].sort((a, b) => b.reportedAt.localeCompare(a.reportedAt))
   const inspections = [...data.inspections].sort((a, b) => a.scheduledFor.localeCompare(b.scheduledFor))
 
+  const issueItems: IssueItem[] = [
+    ...complaints.map((complaint): IssueItem => ({ source: 'campus', at: complaint.raisedAt, complaint })),
+    ...publicIssues.map((issue): IssueItem => ({ source: 'public', at: issue.reportedAt, issue })),
+  ].sort((a, b) => b.at.localeCompare(a.at))
+
+  const itemStatus = (item: IssueItem) =>
+    item.source === 'campus' ? item.complaint.status : item.issue.status === 'reported' ? 'open' : item.issue.status
+  const itemBand = (item: IssueItem) =>
+    item.source === 'campus' ? priorityById.get(item.complaint.id)?.band ?? null : null
+  const filteredItems = issueItems.filter((item) => {
+    if (sourceFilter !== 'all' && item.source !== sourceFilter) return false
+    if (statusFilter !== 'all' && itemStatus(item) !== statusFilter) return false
+    if (priorityFilter !== 'all') {
+      const band = itemBand(item)
+      if (priorityFilter === 'unranked' ? band !== null : band !== priorityFilter) return false
+    }
+    return true
+  })
+
   const tabs = [
-    { id: 'reports', label: personal ? 'My reports' : 'Campus reports', count: data.complaints.length },
-    ...(staff || maintainer ? [{ id: 'priority', label: 'Priority & repeats', count: analysis.maintenance.ranked.length }] : []),
-    { id: 'public', label: 'Public infrastructure', count: data.urbanIssues.length },
+    { id: 'issues', label: personal ? 'My reports' : 'All issues', count: data.complaints.length + data.urbanIssues.length },
+    ...(staff || maintainer ? [{ id: 'priority', label: 'Maintenance priority', count: analysis.maintenance.ranked.length }] : []),
     ...(staff || maintainer ? [{ id: 'inspections', label: 'Inspections', count: data.inspections.length }] : []),
     { id: 'activity', label: 'Activity & audit', count: data.complaintUpdates.length + workspace.audit.length },
   ]
@@ -220,7 +296,7 @@ export default function IssuesMaintenance() {
       { key: 'severity', label: 'Severity', type: 'select', required: true, options: SEVERITY_OPTIONS },
       { key: 'description', label: 'Description', type: 'textarea', required: true, minLength: COMPLAINT_DESCRIPTION_MIN, help: `At least ${COMPLAINT_DESCRIPTION_MIN} characters; say what is wrong, where and when.` },
       { key: 'peopleAffected', label: 'People affected', type: 'integer' },
-      { key: 'note', label: 'Update note', type: 'textarea', help: 'Recorded in the complaint timeline.' },
+      { key: 'note', label: 'Update note', type: 'textarea', help: 'Recorded in the complaint timeline. Required (at least 10 characters) when marking Fixed or closing without a repair.' },
     ]
   }
 
@@ -266,6 +342,26 @@ export default function IssuesMaintenance() {
     await refresh()
   }
 
+  const saveWeights = async () => {
+    setWeightsBusy(true)
+    setWeightsError(null)
+    setWeightsSaved(null)
+    try {
+      await api.savePriorityWeights({
+        severity: Number(weightsDraft.severity),
+        condition: Number(weightsDraft.condition),
+        usersAffected: Number(weightsDraft.usersAffected),
+        daysOpen: Number(weightsDraft.daysOpen),
+      })
+      await refresh()
+      setWeightsSaved('Maintenance priority weights saved. The ranking below has been recalculated with them; the change is in the audit trail.')
+    } catch (err) {
+      setWeightsError(err instanceof Error ? err.message : 'The weights could not be saved.')
+    } finally {
+      setWeightsBusy(false)
+    }
+  }
+
   const canEditComplaint = (complaint: Complaint) => {
     if (staff) return true
     if (maintainer) return complaint.assignedToUserId === myId
@@ -302,7 +398,7 @@ export default function IssuesMaintenance() {
         <Stat label="Open" value={statusCounts.open} detail={`${statusCounts.in_progress} in progress`} tone={statusCounts.open > 0 ? 'high' : 'default'} />
         <Stat label="Resolved or closed" value={statusCounts.resolved + statusCounts.closed} detail="Retained with their full history" tone="good" />
         <Stat
-          label={staff || maintainer ? 'Active in priority queue' : 'My open reports'}
+          label={staff || maintainer ? 'Active maintenance work' : 'My open reports'}
           value={
             staff || maintainer
               ? analysis.maintenance.activeCount
@@ -322,43 +418,155 @@ export default function IssuesMaintenance() {
 
       <Panel
         actions={
-          tab === 'reports' ? (
-            <button
-              type="button"
-              onClick={() => setEditor({ entity: 'complaints', initial: null, title: 'Report a campus problem', size: 'lg' })}
-              className="rounded-md bg-violet px-3.5 py-2 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring"
-            >
-              Report a problem
-            </button>
-          ) : tab === 'public' ? (
-            <button
-              type="button"
-              onClick={() => setEditor({ entity: 'urbanIssues', initial: null, title: 'Report a public infrastructure issue', size: 'lg' })}
-              className="rounded-md bg-violet px-3.5 py-2 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring"
-            >
-              Report public issue
-            </button>
+          tab === 'issues' ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setEditor({ entity: 'complaints', initial: null, title: 'Report a campus problem', size: 'lg' })}
+                className="rounded-md bg-violet px-3.5 py-2 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring"
+              >
+                Report a problem
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditor({ entity: 'urbanIssues', initial: null, title: 'Report a public infrastructure issue', size: 'lg' })}
+                className="rounded-md border border-violet/50 px-3.5 py-2 text-sm font-semibold text-violet-bright hover:bg-violet/15 focus-ring"
+              >
+                Report public issue
+              </button>
+            </div>
           ) : null
         }
       >
         <Tabs tabs={tabs} active={tab} onChange={(id) => setTab(id as TabId)} label="Issues and maintenance views" />
 
         <div className="mt-6">
-          {tab === 'reports' && (
+          {tab === 'issues' && (
             <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="block text-xs text-ivory/60">
+                  Source
+                  <select
+                    value={sourceFilter}
+                    onChange={(event) => setSourceFilter(event.target.value as IssueSourceFilter)}
+                    className="mt-1 min-h-10 w-full rounded-md border border-violet/40 bg-ink px-3 text-sm text-ivory focus-ring"
+                  >
+                    <option value="all">Campus and public</option>
+                    <option value="campus">Campus only</option>
+                    <option value="public">Public only</option>
+                  </select>
+                </label>
+                <label className="block text-xs text-ivory/60">
+                  Status
+                  <select
+                    value={statusFilter}
+                    onChange={(event) => setStatusFilter(event.target.value as IssueStatusFilter)}
+                    className="mt-1 min-h-10 w-full rounded-md border border-violet/40 bg-ink px-3 text-sm text-ivory focus-ring"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="open">Open / reported</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                </label>
+                <label className="block text-xs text-ivory/60">
+                  Maintenance priority
+                  <select
+                    value={priorityFilter}
+                    onChange={(event) => setPriorityFilter(event.target.value as IssuePriorityFilter)}
+                    className="mt-1 min-h-10 w-full rounded-md border border-violet/40 bg-ink px-3 text-sm text-ivory focus-ring"
+                  >
+                    <option value="all">All priorities</option>
+                    <option value="P1">P1</option>
+                    <option value="P2">P2</option>
+                    <option value="P3">P3</option>
+                    <option value="P4">P4</option>
+                    <option value="unranked">Not ranked (public or closed)</option>
+                  </select>
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ivory/50">
+                <span>
+                  Showing {filteredItems.length} of {issueItems.length} issue{issueItems.length === 1 ? '' : 's'}.
+                  Campus and public records are in one list; the source tag on each card says which it is.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSourceFilter('all')
+                    setStatusFilter('all')
+                    setPriorityFilter('all')
+                  }}
+                  className="font-semibold text-violet-bright underline underline-offset-4 hover:text-ivory focus-ring"
+                >
+                  Clear filters
+                </button>
+              </div>
               {staff && (
                 <label className="flex items-center gap-2 text-xs text-ivory/60">
                   <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} className="accent-[#5245f8]" />
                   Show only reports I raised
                 </label>
               )}
-              {complaints.length === 0 ? (
-                <EmptyPanel title={personal ? 'You have not reported a problem yet' : 'No campus reports in view'}>
-                  {personal ? 'Use “Report a problem” to describe what you observed.' : 'Reports raised by users in this college will appear here.'}
+              {filteredItems.length === 0 ? (
+                <EmptyPanel title={personal ? 'No reports match these filters' : 'No issues match these filters'}>
+                  {personal ? 'Use “Report a problem” to describe what you observed, or clear the filters.' : 'Change the filters to see campus and public records.'}
                 </EmptyPanel>
               ) : (
                 <ul className="space-y-3">
-                  {complaints.map((complaint) => {
+                  {filteredItems.map((item) => {
+                    if (item.source === 'public') {
+                      const issue = item.issue
+                      return (
+                        <li key={issue.id} className="border border-violet/25 bg-ink/40 p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge tone="outline">Public</Badge>
+                                <SeverityBadge severity={issue.severity} />
+                                <StatusBadge status={issue.status} />
+                                <Badge tone="neutral">Shared · not college-owned</Badge>
+                                {issue.reporterId === myId && <Badge tone="violet">Reported by you</Badge>}
+                              </div>
+                              <p className="mt-2 text-sm text-ivory">{issue.description}</p>
+                              <p className="mt-1 text-xs text-ivory/50">
+                                {issue.category} · {issue.locationLabel} · reported {formatDateTime(issue.reportedAt)}
+                                {issue.reporterName ? ` by ${issue.reporterName}` : ''}
+                              </p>
+                              <p className="mt-0.5 text-xs text-ivory/45">
+                                Authority: {issue.authority ?? 'Not recorded'}
+                                {issue.urbanAssetId ? ` · asset: ${urbanAssetsById.get(issue.urbanAssetId)?.name ?? issue.urbanAssetId}` : ''}
+                                {issue.resolvedAt ? ` · resolved ${formatDateTime(issue.resolvedAt)}` : ''}
+                              </p>
+                              {issue.note && <p className="mt-2 border-l border-violet/30 pl-2 text-xs text-ivory/60">{issue.note}</p>}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {staff || maintainer ? (
+                                <button
+                                  type="button"
+                                  className={rowActionClass}
+                                  onClick={() => setEditor({ entity: 'urbanIssues', initial: issue as unknown as Record<string, unknown>, title: 'Update public issue', size: 'md' })}
+                                >
+                                  Update status
+                                </button>
+                              ) : null}
+                              {role === 'admin' && (
+                                <button
+                                  type="button"
+                                  className={rowActionClass}
+                                  onClick={() => setPendingDelete({ entity: 'urbanIssues', id: issue.id, label: `public issue “${issue.description.slice(0, 60)}”` })}
+                                >
+                                  Delete
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <PublicPhoto name={issue.photoName} dataUrl={issue.photoDataUrl} />
+                        </li>
+                      )
+                    }
+                    const complaint = item.complaint
                     const ranked = priorityById.get(complaint.id)
                     const finding = findingById.get(`maintenance-${complaint.id}`)
                     const updates = [...(updatesByComplaint.get(complaint.id) ?? [])].sort((a, b) => a.at.localeCompare(b.at))
@@ -367,11 +575,12 @@ export default function IssuesMaintenance() {
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
+                              <Badge tone="violet">Campus</Badge>
                               <SeverityBadge severity={complaint.severity} />
                               <StatusBadge status={complaint.status} />
                               {ranked && (
                                 <Badge tone={ranked.band === 'P1' ? 'error' : ranked.band === 'P2' ? 'warn' : 'violet'}>
-                                  {ranked.bandLabel} · score {ranked.score}
+                                  {ranked.bandLabel} · {ranked.score} priority points
                                 </Badge>
                               )}
                               {complaint.reporterId === myId && <Badge tone="outline">Raised by you</Badge>}
@@ -385,6 +594,19 @@ export default function IssuesMaintenance() {
                               Assigned to: {complaint.assignedToUserId ? (complaint.assignedToName ?? membersById.get(complaint.assignedToUserId)?.displayName ?? complaint.assignedToUserId) : 'Not yet assigned'}
                               {complaint.resolvedAt ? ` · resolved ${formatDateTime(complaint.resolvedAt)}` : ''}
                             </p>
+                            {complaint.status === 'closed' && !complaint.resolvedAt && (
+                              <p className="mt-1 border-l-2 border-status-error-dark pl-2 text-xs text-ivory/70">
+                                <span className="font-semibold text-status-error-dark">Closed without repair.</span>{' '}
+                                {complaint.closedReason ? `Reason given: ${complaint.closedReason}` : 'No reason was recorded.'}
+                              </p>
+                            )}
+                            {(complaint.status === 'resolved' || (complaint.status === 'closed' && complaint.resolvedAt)) &&
+                              complaint.completionNote && (
+                                <p className="mt-1 border-l-2 border-status-ok-dark pl-2 text-xs text-ivory/70">
+                                  <span className="font-semibold text-status-ok-dark">What was done:</span>{' '}
+                                  {complaint.completionNote}
+                                </p>
+                              )}
                           </div>
                           <div className="flex flex-wrap gap-2">
                             {canEditComplaint(complaint) && (
@@ -408,7 +630,8 @@ export default function IssuesMaintenance() {
                           </div>
                         </div>
 
-                        <Photo name={complaint.photoName} dataUrl={complaint.photoDataUrl} />
+                        <Photo complaint={complaint} kind="report" />
+                        <Photo complaint={complaint} kind="completion" />
 
                         <details className="mt-3 border-t border-violet/20 pt-2">
                           <summary className="cursor-pointer font-mono text-[0.625rem] uppercase tracking-widest text-violet-bright focus-ring">
@@ -417,7 +640,7 @@ export default function IssuesMaintenance() {
                           {ranked && (
                             <div className="mt-3 grid gap-3 sm:grid-cols-2">
                               <div>
-                                <p className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">What the score uses</p>
+                                <p className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">What the priority points use</p>
                                 <ul className="mt-1 space-y-1 text-xs">
                                   {ranked.components.map((component) => (
                                     <li key={component.key} className="flex justify-between gap-3">
@@ -426,6 +649,11 @@ export default function IssuesMaintenance() {
                                     </li>
                                   ))}
                                 </ul>
+                                <p className="mt-2 text-[0.6875rem] leading-relaxed text-ivory/45">
+                                  People affected is the number the reporter entered, not an estimate. It adds{' '}
+                                  {workspace.priorityWeights.usersAffected} point(s) per 10 people, capped at 15; days
+                                  open adds {workspace.priorityWeights.daysOpen} point(s) per 3 days, capped at 15.
+                                </p>
                               </div>
                               <div>
                                 <p className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">History</p>
@@ -474,47 +702,134 @@ export default function IssuesMaintenance() {
 
           {tab === 'priority' && (staff || maintainer) && (
             <div className="space-y-6">
-              <div>
-                <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Ranked by priority</p>
+              <div className="min-w-0 border border-violet/25 bg-ink/40 p-4">
+                <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Maintenance priority weights</p>
+                <p className="mt-1 text-xs leading-relaxed text-ivory/55">
+                  These four weights feed the maintenance priority score. Severity is the maximum for a critical
+                  complaint; condition applies to a linked asset in poor condition; users affected adds points per 10
+                  people; days open adds points per 3 days. Status, repeat and asset-criticality points stay fixed.
+                  Missing data is never scored as zero.
+                </p>
+                {role === 'admin' ? (
+                  <div className="mt-3">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <label className="block text-xs text-ivory/60">
+                        Severity (critical = max)
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={weightsDraft.severity}
+                          onChange={(event) => setWeightsDraft((current) => ({ ...current, severity: event.target.value }))}
+                          className="mt-1 min-h-10 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
+                        />
+                      </label>
+                      <label className="block text-xs text-ivory/60">
+                        Condition (poor asset)
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={weightsDraft.condition}
+                          onChange={(event) => setWeightsDraft((current) => ({ ...current, condition: event.target.value }))}
+                          className="mt-1 min-h-10 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
+                        />
+                      </label>
+                      <label className="block text-xs text-ivory/60">
+                        Users affected (per 10)
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={weightsDraft.usersAffected}
+                          onChange={(event) => setWeightsDraft((current) => ({ ...current, usersAffected: event.target.value }))}
+                          className="mt-1 min-h-10 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
+                        />
+                      </label>
+                      <label className="block text-xs text-ivory/60">
+                        Days open (per 3 days)
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={weightsDraft.daysOpen}
+                          onChange={(event) => setWeightsDraft((current) => ({ ...current, daysOpen: event.target.value }))}
+                          className="mt-1 min-h-10 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        disabled={weightsBusy}
+                        onClick={() => void saveWeights()}
+                        className="rounded-md bg-violet px-4 py-2 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {weightsBusy ? 'Saving…' : 'Save weights'}
+                      </button>
+                      <span className="text-xs text-ivory/45">
+                        Administrators only. Every change is audited with the old and new weights.
+                      </span>
+                    </div>
+                    {weightsError && <Notice tone="danger" className="mt-3">{weightsError}</Notice>}
+                    {weightsSaved && <Notice tone="success" className="mt-3">{weightsSaved}</Notice>}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-ivory/50">
+                    Read-only for your role. Current weights: severity {workspace.priorityWeights.severity}, condition{' '}
+                    {workspace.priorityWeights.condition}, users affected {workspace.priorityWeights.usersAffected} per
+                    10 people, days open {workspace.priorityWeights.daysOpen} per 3 days
+                    {workspace.priorityWeights.updatedByName
+                      ? `; last changed by ${workspace.priorityWeights.updatedByName} on ${formatDateTime(workspace.priorityWeights.updatedAt as string)}`
+                      : '; recorded defaults, no administrator change yet'}
+                    .
+                  </p>
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <p className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Maintenance priority order</p>
                 <p className="mt-1 text-xs leading-relaxed text-ivory/50">
-                  Severity, status, people affected, age, repeat history and linked-asset risk. Missing people counts
-                  are marked unavailable, not scored as zero.
+                  Severity, condition, people affected, days open, status, repeat history and linked-asset risk. Missing
+                  people counts are marked unavailable, not scored as zero. This orders the work; it is not a safety
+                  assessment.
                 </p>
                 {analysis.maintenance.ranked.length === 0 ? (
                   <p className="mt-3 text-sm text-ivory/55">No active complaints are visible to your role.</p>
                 ) : (
-                  <div className="mt-3 overflow-x-auto">
-                    <table className="w-full min-w-[860px] border-collapse">
-                      <thead><tr className="border-b border-violet/30">
-                        <th className={thClass}>Priority</th><th className={thClass}>Score</th><th className={thClass}>Complaint</th><th className={thClass}>Target</th><th className={thClass}>Age</th><th className={thClass}>Assigned</th><th className={thClass}>Details</th>
-                      </tr></thead>
-                      <tbody>
-                        {analysis.maintenance.ranked.map((ranked) => {
-                          const finding = findingById.get(`maintenance-${ranked.complaintId}`)
-                          return (
-                            <tr key={ranked.complaintId} className="border-b border-violet/15 last:border-0">
-                              <td className={tdClass}><Badge tone={ranked.band === 'P1' ? 'error' : ranked.band === 'P2' ? 'warn' : 'violet'}>{ranked.bandLabel}</Badge></td>
-                              <td className={`${tdClass} font-mono text-ivory`}>{ranked.score}</td>
-                              <td className={`${tdClass} max-w-sm`}>
-                                <span className="text-ivory">{ranked.category}</span> — {ranked.description}
-                                <span className="mt-0.5 block text-[0.625rem] text-ivory/40">{titleCase(ranked.severity)} · {titleCase(ranked.status)}</span>
-                              </td>
-                              <td className={tdClass}>{ranked.targetLabel}</td>
-                              <td className={tdClass}>{ranked.ageDays}d</td>
-                              <td className={tdClass}>{ranked.assignedToUserId ? (membersById.get(ranked.assignedToUserId)?.displayName ?? 'Assigned') : 'Unassigned'}</td>
-                              <td className={tdClass}>
-                                {finding ? (
-                                  <button type="button" className={rowActionClass} onClick={() => setExplained(finding)}>How?</button>
-                                ) : (
-                                  <span className="text-xs text-ivory/35">No flag</span>
-                                )}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <ul className="mt-3 space-y-2">
+                    {analysis.maintenance.ranked.map((ranked) => {
+                      const finding = findingById.get(`maintenance-${ranked.complaintId}`)
+                      return (
+                        <li key={ranked.complaintId} className="border border-violet/25 bg-ink/40 p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge tone={ranked.band === 'P1' ? 'error' : ranked.band === 'P2' ? 'warn' : 'violet'}>
+                                {ranked.bandLabel}
+                              </Badge>
+                              <span className="font-mono text-sm text-ivory">{ranked.score} points</span>
+                              <span className="text-sm text-ivory">{ranked.category}</span>
+                              <span className="text-[0.625rem] text-ivory/40">
+                                {titleCase(ranked.severity)} · {titleCase(ranked.status)}
+                              </span>
+                            </div>
+                            {finding && (
+                              <button type="button" className={rowActionClass} onClick={() => setExplained(finding)}>
+                                How?
+                              </button>
+                            )}
+                          </div>
+                          <p className="mt-1 text-sm leading-relaxed text-ivory/75">{ranked.description}</p>
+                          <p className="mt-1 text-xs text-ivory/45">
+                            {ranked.targetLabel} · {ranked.ageDays} day(s) open ·{' '}
+                            {ranked.assignedToUserId
+                              ? membersById.get(ranked.assignedToUserId)?.displayName ?? 'Assigned'
+                              : 'Unassigned'}
+                          </p>
+                        </li>
+                      )
+                    })}
+                  </ul>
                 )}
               </div>
 
@@ -565,72 +880,11 @@ export default function IssuesMaintenance() {
             </div>
           )}
 
-          {tab === 'public' && (
-            <div className="space-y-4">
-              <p className="text-sm leading-relaxed text-ivory/60">
-                Public infrastructure is shared across colleges and is not owned by any one institution. Staff roles can
-                update status and add a resolution note; only an administrator can delete a record.
-              </p>
-              {publicIssues.length === 0 ? (
-                <EmptyPanel title="No public issues reported">Report broken lighting, footway defects, drainage or other shared infrastructure.</EmptyPanel>
-              ) : (
-                <ul className="space-y-3">
-                  {publicIssues.map((issue) => (
-                    <li key={issue.id} className="border border-violet/25 bg-ink/40 p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <SeverityBadge severity={issue.severity} />
-                            <StatusBadge status={issue.status} />
-                            <Badge tone="outline">Shared · not college-owned</Badge>
-                            {issue.reporterId === myId && <Badge tone="violet">Reported by you</Badge>}
-                          </div>
-                          <p className="mt-2 text-sm text-ivory">{issue.description}</p>
-                          <p className="mt-1 text-xs text-ivory/50">
-                            {issue.category} · {issue.locationLabel} · reported {formatDateTime(issue.reportedAt)}
-                            {issue.reporterName ? ` by ${issue.reporterName}` : ''}
-                          </p>
-                          <p className="mt-0.5 text-xs text-ivory/45">
-                            Authority: {issue.authority ?? 'Not recorded'}
-                            {issue.urbanAssetId ? ` · asset: ${urbanAssetsById.get(issue.urbanAssetId)?.name ?? issue.urbanAssetId}` : ''}
-                            {issue.resolvedAt ? ` · resolved ${formatDateTime(issue.resolvedAt)}` : ''}
-                          </p>
-                          {issue.note && <p className="mt-2 border-l border-violet/30 pl-2 text-xs text-ivory/60">{issue.note}</p>}
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {staff || maintainer ? (
-                            <button
-                              type="button"
-                              className={rowActionClass}
-                              onClick={() => setEditor({ entity: 'urbanIssues', initial: issue as unknown as Record<string, unknown>, title: 'Update public issue', size: 'md' })}
-                            >
-                              Update status
-                            </button>
-                          ) : null}
-                          {role === 'admin' && (
-                            <button
-                              type="button"
-                              className={rowActionClass}
-                              onClick={() => setPendingDelete({ entity: 'urbanIssues', id: issue.id, label: `public issue “${issue.description.slice(0, 60)}”` })}
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <Photo name={issue.photoName} dataUrl={issue.photoDataUrl} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
           {tab === 'inspections' && (staff || maintainer) && (
             <div className="space-y-4">
               {analysis.maintenance.inspectionAlerts.length > 0 && (
                 <Notice tone="warning" title={`${analysis.maintenance.inspectionAlerts.length} inspection alert(s)`}>
-                  Overdue, due-soon and missing-completion alerts are listed under Priority &amp; repeats. Completion
+                  Overdue, due-soon and missing-completion alerts are listed under Maintenance priority. Completion
                   times are never invented — a completed inspection without a recorded time stays flagged.
                 </Notice>
               )}
@@ -639,36 +893,41 @@ export default function IssuesMaintenance() {
                   {maintainer ? 'No inspections are assigned to you.' : 'Schedule inspections from the Inventory module.'}
                 </EmptyPanel>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[820px] border-collapse">
-                    <thead><tr className="border-b border-violet/30">
-                      <th className={thClass}>Asset</th><th className={thClass}>Scheduled</th><th className={thClass}>Status</th><th className={thClass}>Completed</th><th className={thClass}>Inspector</th><th className={thClass}>Findings</th><th className={thClass}>Actions</th>
-                    </tr></thead>
-                    <tbody>
-                      {inspections.map((inspection) => (
-                        <tr key={inspection.id} className="border-b border-violet/15 last:border-0">
-                          <td className={tdClass}>{assetsById.get(inspection.assetId)?.name ?? 'Asset not in view'}</td>
-                          <td className={tdClass}>{formatDateTime(inspection.scheduledFor)}</td>
-                          <td className={tdClass}><StatusBadge status={inspection.status} /></td>
-                          <td className={tdClass}>{inspection.completedAt ? formatDateTime(inspection.completedAt) : <span className="italic text-ivory/40">Not recorded</span>}</td>
-                          <td className={tdClass}>{inspection.inspectorUserId ? (membersById.get(inspection.inspectorUserId)?.displayName ?? 'Staff member') : 'Unassigned'}</td>
-                          <td className={`${tdClass} max-w-xs`}>{inspection.findings ?? '—'}</td>
-                          <td className={tdClass}>
-                            {canEditInspection(inspection.id) && (
-                              <button
-                                type="button"
-                                className={rowActionClass}
-                                onClick={() => setEditor({ entity: 'inspections', initial: inspection as unknown as Record<string, unknown>, title: 'Update inspection', size: 'md' })}
-                              >
-                                {maintainer ? 'Record outcome' : 'Edit'}
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <ul className="space-y-2">
+                  {inspections.map((inspection) => (
+                    <li key={inspection.id} className="border border-violet/25 bg-ink/40 p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm text-ivory">{assetsById.get(inspection.assetId)?.name ?? 'Asset not in view'}</p>
+                          <p className="mt-0.5 text-xs text-ivory/45">
+                            Scheduled {formatDateTime(inspection.scheduledFor)} ·{' '}
+                            {inspection.inspectorUserId
+                              ? membersById.get(inspection.inspectorUserId)?.displayName ?? 'Staff member'
+                              : 'Unassigned'}
+                          </p>
+                        </div>
+                        {canEditInspection(inspection.id) && (
+                          <button
+                            type="button"
+                            className={rowActionClass}
+                            onClick={() => setEditor({ entity: 'inspections', initial: inspection as unknown as Record<string, unknown>, title: 'Update inspection', size: 'md' })}
+                          >
+                            {maintainer ? 'Record outcome' : 'Edit'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <StatusBadge status={inspection.status} />
+                        <span className="text-xs text-ivory/50">
+                          Completed: {inspection.completedAt ? formatDateTime(inspection.completedAt) : 'not recorded'}
+                        </span>
+                      </div>
+                      {inspection.findings && (
+                        <p className="mt-1 text-xs leading-relaxed text-ivory/60">{inspection.findings}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
           )}
@@ -729,7 +988,9 @@ export default function IssuesMaintenance() {
           entity={editor.entity}
           title={editor.title}
           description={
-            editor.entity === 'complaints' && editor.initial
+            editor.entity === 'urbanIssues' && !editor.initial?.id
+              ? 'Review before saving. This creates a public issue visible inside this college only, including its description and photo. Do not include personal information. Nothing is sent to the authority.'
+              : editor.entity === 'complaints' && editor.initial
               ? maintainer
                 ? 'Maintenance staff can update the status and add a work note on assigned complaints.'
                 : 'Status changes and assignments are recorded in the complaint timeline.'
@@ -742,7 +1003,7 @@ export default function IssuesMaintenance() {
                 ? complaintEditFields()
                 : complaintCreateFields()
               : editor.entity === 'urbanIssues'
-                ? editor.initial
+                ? editor.initial?.id
                   ? [
                       { key: 'status', label: 'Status', type: 'select', required: true, options: URBAN_STATUS_OPTIONS },
                       { key: 'note', label: 'Resolution / update note', type: 'textarea', help: 'Visible on the shared public issue.' },

@@ -15,10 +15,12 @@ export type Capability =
   | 'update-urban-issues'
   | 'view-audit'
   | 'submit-complaints'
+  | 'manage-thresholds'
+  | 'manage-priority-weights'
 
 const CAPABILITIES: Record<Capability, readonly UserRole[]> = {
   'manage-inventory': ['admin', 'estates'],
-  'import-data': ['admin', 'estates'],
+  'import-data': ['admin'],
   'assign-complaints': ['admin', 'estates'],
   'view-all-complaints': ['admin', 'estates'],
   'view-assigned-only': ['maintenance'],
@@ -30,10 +32,19 @@ const CAPABILITIES: Record<Capability, readonly UserRole[]> = {
   'update-urban-issues': ['admin', 'estates'],
   'view-audit': ['admin', 'estates'],
   'submit-complaints': ['admin', 'estates', 'maintenance', 'faculty', 'student'],
+  'manage-thresholds': ['admin'],
+  'manage-priority-weights': ['admin'],
 }
 
 export function hasCapability(role: UserRole, capability: Capability): boolean {
   return CAPABILITIES[capability].includes(role)
+}
+
+export function capabilityMatrix(): { capability: Capability; roles: UserRole[] }[] {
+  return (Object.keys(CAPABILITIES) as Capability[]).map((capability) => ({
+    capability,
+    roles: [...CAPABILITIES[capability]],
+  }))
 }
 
 export function isStaffRole(role: UserRole): boolean {

@@ -81,6 +81,8 @@ export interface UtilityReset {
 export interface MeterAnalysis {
   meter: UtilityMeter
   buildingName: string
+  /** Estimated meters cannot support a leak prompt; their values are still reported. */
+  measurementType: 'measured' | 'estimated'
   periods: UtilityPeriod[]
   knownConsumption: number
   knownPeriods: number
@@ -128,6 +130,7 @@ const METHODS = [
   'A flagged spike is a statistical prompt to investigate, not a diagnosis. Weather, occupancy, equipment changes and meter faults are not in the readings.',
   'Cost is estimated only for periods with recorded consumption and a tariff matching the utility, unit and effective date. Standing charges are shown but not allocated to individual readings. Estimates are not supplier invoices.',
   'Missing readings are excluded from totals; totals are therefore lower bounds for the full calendar period.',
+  'Measured meters are tested for unusual values. Estimated meters are shown as Estimated: the estimation step could itself create or hide a spike, so no leak prompt is produced for them.',
 ]
 
 function median(values: number[]): number | null {
@@ -337,6 +340,7 @@ export function analyseUtilities(
   const findings: Finding[] = []
 
   for (const meter of meters) {
+    const measurementType = meter.measurementType === 'estimated' ? 'estimated' : 'measured'
     const meterReadings = readings.filter((reading) => reading.meterId === meter.id)
     const { periods: rawPeriods, resets } = buildPeriods(meter, meterReadings)
     const gaps = collectGaps(meter, meterReadings)
@@ -369,6 +373,7 @@ export function analyseUtilities(
         deviationPct = excess / seriesMedian
         robustZ = mad > 0 ? (0.6745 * excess) / mad : null
         isSpike =
+          measurementType === 'measured' &&
           values.length >= SPIKE_RULE.minimumPeriods &&
           (mad > 0
             ? robustZ !== null && robustZ >= SPIKE_RULE.robustZ && deviationPct >= SPIKE_RULE.minimumRelativeExcess
@@ -435,6 +440,7 @@ export function analyseUtilities(
     const analysis: MeterAnalysis = {
       meter,
       buildingName: buildingName.get(meter.buildingId) ?? 'Unknown building',
+      measurementType,
       periods,
       knownConsumption: round2(totalConsumption),
       knownPeriods,
