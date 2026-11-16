@@ -43,6 +43,24 @@ const idField: FieldSpec = {
 }
 
 const conditionEnum: readonly AssetCondition[] = ['good', 'fair', 'poor']
+const basisEnum = ['measured', 'estimated', 'illustrative'] as const
+const basisField: FieldSpec = {
+  key: 'basis',
+  label: 'Basis tag',
+  type: 'nullable-enum',
+  required: false,
+  enumValues: basisEnum,
+  aliases: ['basis', 'basis tag', 'evidence basis'],
+  note: 'Keep the source row tag: Measured, Estimated or Illustrative.',
+}
+const provenanceNoteField: FieldSpec = {
+  key: 'provenanceNote',
+  label: 'Source note',
+  type: 'nullable-string',
+  required: false,
+  aliases: ['source', 'source note', 'provenance', 'how it was obtained'],
+  note: 'Free text from the source row explaining where the value came from.',
+}
 const severityEnum: readonly Severity[] = ['low', 'medium', 'high', 'critical']
 const utilityEnum: readonly UtilityType[] = ['electricity', 'water']
 const complaintStatusEnum: readonly ComplaintStatus[] = ['open', 'in_progress', 'resolved', 'closed']
@@ -59,20 +77,21 @@ export const ENTITY_SPECS: EntitySpec[] = [
     entity: 'nearbyAssets',
     label: 'Nearby assets',
     scope: 'campus',
-    importable: false,
+    importable: true,
     order: 16,
     naturalKey: 'ID',
     fields: [
-      idField,
-      { key: 'type', label: 'Type', type: 'enum', required: true, enumValues: Object.keys(NEARBY_TYPE_LABELS), aliases: [] },
-      { key: 'locationDescription', label: 'Location description', type: 'string', required: true, aliases: [] },
-      { key: 'distanceMetres', label: 'Distance from college gate (m)', type: 'number', required: true, aliases: [] },
+      { ...idField, aliases: [...idField.aliases, 'asset id'] },
+      { key: 'type', label: 'Type', type: 'enum', required: true, enumValues: Object.keys(NEARBY_TYPE_LABELS), aliases: ['asset type'] },
+      { key: 'locationDescription', label: 'Location description', type: 'string', required: true, aliases: ['location description', 'location'] },
+      { key: 'distanceMetres', label: 'Distance from college gate (m)', type: 'number', required: true, aliases: ['distance from gate m', 'distance from college gate m'] },
       { key: 'distanceBasis', label: 'Distance basis', type: 'enum', required: true, enumValues: ['measured', 'estimated'], aliases: [] },
       { key: 'condition', label: 'Condition', type: 'nullable-enum', required: false, enumValues: conditionEnum, aliases: [] },
-      { key: 'dailyUsers', label: 'Estimated daily users', type: 'nullable-integer', required: false, aliases: [] },
-      { key: 'usersMethod', label: 'How daily users were obtained', type: 'nullable-string', required: false, aliases: [] },
-      { key: 'responsibleAuthority', label: 'Responsible authority', type: 'string', required: true, aliases: [] },
+      { key: 'dailyUsers', label: 'Estimated daily users', type: 'nullable-integer', required: false, aliases: ['estimated daily users'] },
+      { key: 'usersMethod', label: 'How daily users were obtained', type: 'nullable-string', required: false, aliases: ['daily users method'] },
+      { key: 'responsibleAuthority', label: 'Responsible authority', type: 'nullable-string', required: false, aliases: ['responsible authority'], note: 'Leave empty when nobody has identified the authority. Empty is shown as not recorded, never invented.' },
       { key: 'basis', label: 'Basis tag', type: 'enum', required: true, enumValues: ['measured', 'estimated', 'illustrative'], aliases: [] },
+      provenanceNoteField,
     ],
   },
   {
@@ -83,10 +102,14 @@ export const ENTITY_SPECS: EntitySpec[] = [
     order: 1,
     naturalKey: 'college + building name',
     fields: [
-      idField,
+      { ...idField, aliases: [...idField.aliases, 'building id'] },
       { key: 'name', label: 'Building name', type: 'string', required: true, aliases: ['building', 'building name', 'site', 'block'] },
       { key: 'address', label: 'Address', type: 'nullable-string', required: false, aliases: ['address', 'street', 'location'] },
+      { key: 'floors', label: 'Floors', type: 'nullable-integer', required: false, aliases: ['floors', 'floor count', 'number of floors'] },
+      { key: 'hasLift', label: 'Has lift', type: 'nullable-string', required: false, aliases: ['has lift', 'lift', 'elevator'], note: 'Yes or No as supplied. Not inferred.' },
       { key: 'notes', label: 'Notes', type: 'nullable-string', required: false, aliases: ['notes', 'description'] },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -97,15 +120,18 @@ export const ENTITY_SPECS: EntitySpec[] = [
     order: 2,
     naturalKey: 'building + room code',
     fields: [
-      idField,
+      { ...idField, aliases: [...idField.aliases, 'room id'] },
       { key: 'buildingId', label: 'Building ID', type: 'string', required: true, aliases: ['building id', 'building', 'building code'] },
       { key: 'code', label: 'Room code', type: 'string', required: true, aliases: ['room code', 'room', 'room number', 'code'] },
       { key: 'name', label: 'Room name', type: 'nullable-string', required: false, aliases: ['room name', 'name'] },
+      { key: 'roomType', label: 'Room type', type: 'nullable-string', required: false, aliases: ['room type', 'space type'] },
       { key: 'floor', label: 'Floor', type: 'nullable-string', required: false, aliases: ['floor', 'level'] },
       { key: 'areaM2', label: 'Area (m2)', type: 'nullable-number', required: false, aliases: ['area', 'area m2', 'area (m2)', 'floor area'] },
       { key: 'capacity', label: 'Seat capacity', type: 'nullable-integer', required: false, aliases: ['capacity', 'seats', 'seat capacity', 'max occupancy'], note: 'Leave empty when unknown. Empty stays null, never zero.' },
       { key: 'condition', label: 'Condition', type: 'nullable-enum', required: false, enumValues: conditionEnum, aliases: ['condition', 'room condition'] },
       { key: 'notes', label: 'Notes', type: 'nullable-string', required: false, aliases: ['notes', 'description'] },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -116,14 +142,16 @@ export const ENTITY_SPECS: EntitySpec[] = [
     order: 3,
     naturalKey: 'room + start + end',
     fields: [
-      idField,
+      { ...idField, aliases: [...idField.aliases, 'session id'] },
       { key: 'roomId', label: 'Room ID', type: 'string', required: true, aliases: ['room id', 'room', 'room code'] },
       { key: 'startsAt', label: 'Starts at', type: 'iso-date', required: true, aliases: ['start', 'starts at', 'start time', 'from'] },
       { key: 'endsAt', label: 'Ends at', type: 'iso-date', required: true, aliases: ['end', 'ends at', 'end time', 'to'] },
-      { key: 'activity', label: 'Activity', type: 'string', required: true, aliases: ['activity', 'module', 'class', 'event'] },
+      { key: 'activity', label: 'Activity', type: 'string', required: true, aliases: ['activity', 'module', 'class', 'event', 'class label'] },
       { key: 'moduleCode', label: 'Module code', type: 'nullable-string', required: false, aliases: ['module code', 'course code'] },
-      { key: 'expectedAttendance', label: 'Expected attendance', type: 'nullable-integer', required: false, aliases: ['expected attendance', 'demand', 'expected students', 'class size'], note: 'Demand evidence for capacity checks.' },
-      { key: 'attendance', label: 'Actual attendance', type: 'nullable-integer', required: false, aliases: ['attendance', 'actual attendance', 'headcount', 'occupancy'], note: 'Occupancy evidence. Leave empty if not captured.' },
+      { key: 'expectedAttendance', label: 'Expected attendance', type: 'nullable-integer', required: false, aliases: ['expected attendance', 'demand', 'expected students', 'class size', 'enrolled'], note: 'Demand evidence for capacity checks.' },
+      { key: 'attendance', label: 'Actual attendance', type: 'nullable-integer', required: false, aliases: ['attendance', 'actual attendance', 'headcount', 'occupancy', 'present'], note: 'Occupancy evidence. Leave empty if not captured.' },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -134,16 +162,20 @@ export const ENTITY_SPECS: EntitySpec[] = [
     order: 4,
     naturalKey: 'college + asset name',
     fields: [
-      idField,
+      { ...idField, aliases: [...idField.aliases, 'asset id'] },
       { key: 'buildingId', label: 'Building ID', type: 'nullable-string', required: false, aliases: ['building id', 'building', 'location'], note: 'Empty = campus-wide asset.' },
-      { key: 'name', label: 'Asset name', type: 'string', required: true, aliases: ['asset', 'asset name', 'equipment', 'item'] },
+      { key: 'roomId', label: 'Room reference', type: 'nullable-string', required: false, aliases: ['room id', 'room', 'room reference'], note: 'Stored as given when it does not match a room in this college.' },
+      { key: 'name', label: 'Asset name', type: 'string', required: true, aliases: ['asset', 'asset name', 'equipment', 'item', 'asset type'] },
       { key: 'category', label: 'Category', type: 'string', required: true, aliases: ['category', 'asset category', 'type'] },
+      { key: 'quantity', label: 'Quantity', type: 'nullable-integer', required: false, aliases: ['count', 'quantity', 'units', 'number of units'] },
       { key: 'installedAt', label: 'Installed at', type: 'nullable-iso-date', required: false, aliases: ['installed', 'install date', 'installed at'] },
       { key: 'condition', label: 'Condition', type: 'nullable-enum', required: false, enumValues: conditionEnum, aliases: ['condition', 'asset condition'] },
       { key: 'lastInspectedAt', label: 'Last inspected', type: 'nullable-iso-date', required: false, aliases: ['last inspected', 'last inspection', 'inspection date'] },
       { key: 'inspectionIntervalDays', label: 'Inspection interval (days)', type: 'nullable-integer', required: false, aliases: ['inspection interval', 'interval days', 'inspection frequency'] },
       { key: 'criticality', label: 'Criticality', type: 'nullable-enum', required: false, enumValues: severityEnum, aliases: ['criticality', 'priority', 'importance'] },
       { key: 'notes', label: 'Notes', type: 'nullable-string', required: false, aliases: ['notes', 'description'] },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -161,6 +193,8 @@ export const ENTITY_SPECS: EntitySpec[] = [
       { key: 'inspectorUserId', label: 'Inspector user ID', type: 'nullable-string', required: false, aliases: ['inspector', 'inspector user id', 'staff id'] },
       { key: 'findings', label: 'Findings', type: 'nullable-string', required: false, aliases: ['findings', 'result', 'notes'] },
       { key: 'status', label: 'Status', type: 'enum', required: true, enumValues: inspectionStatusEnum, aliases: ['status', 'inspection status'] },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -178,6 +212,8 @@ export const ENTITY_SPECS: EntitySpec[] = [
       { key: 'readingType', label: 'Reading type', type: 'enum', required: true, enumValues: readingTypeEnum, aliases: ['reading type', 'meter type', 'cumulative or interval'] },
       { key: 'label', label: 'Meter label', type: 'string', required: true, aliases: ['meter', 'meter label', 'meter name', 'name'] },
       { key: 'measurementType', label: 'Measurement type', type: 'enum', required: false, enumValues: ['measured', 'estimated'] as const, aliases: ['measurement type', 'measured or estimated', 'reading source'] },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -190,10 +226,12 @@ export const ENTITY_SPECS: EntitySpec[] = [
     fields: [
       idField,
       { key: 'meterId', label: 'Meter ID', type: 'string', required: true, aliases: ['meter id', 'meter'] },
-      { key: 'readAt', label: 'Read at', type: 'iso-date', required: true, aliases: ['read at', 'reading date', 'date'] },
+      { key: 'readAt', label: 'Read at', type: 'iso-date', required: true, aliases: ['read at', 'reading date', 'date', 'month'] },
       { key: 'value', label: 'Value', type: 'nullable-number', required: false, aliases: ['value', 'reading', 'consumption', 'register'], note: 'Leave empty for a missing reading. It is preserved as a gap, never zero.' },
       { key: 'unit', label: 'Unit', type: 'string', required: true, aliases: ['unit'] },
       { key: 'note', label: 'Note', type: 'nullable-string', required: false, aliases: ['note', 'comment', 'remarks'] },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -212,6 +250,8 @@ export const ENTITY_SPECS: EntitySpec[] = [
       { key: 'standingChargePerPeriod', label: 'Standing charge per period', type: 'nullable-number', required: false, aliases: ['standing charge', 'fixed charge'] },
       { key: 'effectiveFrom', label: 'Effective from', type: 'iso-date', required: true, aliases: ['effective from', 'start date', 'valid from'] },
       { key: 'note', label: 'Note', type: 'nullable-string', required: false, aliases: ['note', 'source', 'description'], note: 'Record the tariff source here so estimates are not mistaken for supplied prices.' },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -222,7 +262,7 @@ export const ENTITY_SPECS: EntitySpec[] = [
     order: 9,
     naturalKey: 'college + raised date + description',
     fields: [
-      idField,
+      { ...idField, aliases: [...idField.aliases, 'complaint id'] },
       { key: 'buildingId', label: 'Building ID', type: 'string', required: true, aliases: ['building id', 'building', 'block'] },
       { key: 'roomChoice', label: 'Room known', type: 'enum', required: true, enumValues: complaintRoomChoiceEnum, aliases: ['room choice', 'room known', 'room status'] },
       { key: 'roomId', label: 'Room ID', type: 'nullable-string', required: false, aliases: ['room id', 'room'] },
@@ -231,11 +271,13 @@ export const ENTITY_SPECS: EntitySpec[] = [
       { key: 'severity', label: 'Severity', type: 'enum', required: true, enumValues: severityEnum, aliases: ['severity', 'urgency', 'priority'] },
       { key: 'description', label: 'Description', type: 'string', required: true, aliases: ['description', 'complaint', 'details', 'issue'], note: 'At least 15 characters; say what is wrong, where and when.' },
       { key: 'status', label: 'Status', type: 'enum', required: true, enumValues: complaintStatusEnum, aliases: ['status', 'state'] },
-      { key: 'raisedAt', label: 'Raised at', type: 'iso-date', required: true, aliases: ['raised at', 'reported at', 'date', 'created at'] },
+      { key: 'raisedAt', label: 'Raised at', type: 'iso-date', required: true, aliases: ['raised at', 'reported at', 'date', 'created at', 'date reported'] },
       { key: 'resolvedAt', label: 'Resolved at', type: 'nullable-iso-date', required: false, aliases: ['resolved at', 'closed at', 'resolution date'] },
       { key: 'assignedToUserId', label: 'Assigned user ID', type: 'nullable-string', required: false, aliases: ['assigned to', 'assignee', 'assigned user id'] },
       { key: 'peopleAffected', label: 'People affected', type: 'nullable-integer', required: false, aliases: ['people affected', 'users affected', 'affected'] },
       { key: 'photoName', label: 'Photo file name', type: 'nullable-string', required: false, aliases: ['photo', 'photo name', 'image'] },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -261,6 +303,8 @@ export const ENTITY_SPECS: EntitySpec[] = [
       { key: 'assumptions', label: 'Assumptions', type: 'string', required: true, aliases: ['assumptions', 'premises'] },
       { key: 'risks', label: 'Risks', type: 'string', required: true, aliases: ['risks', 'trade-offs'] },
       { key: 'evidence', label: 'Evidence', type: 'string', required: true, aliases: ['evidence', 'basis'] },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -276,6 +320,8 @@ export const ENTITY_SPECS: EntitySpec[] = [
       { key: 'name', label: 'Name', type: 'nullable-string', required: false, aliases: ['name', 'asset name'] },
       { key: 'locationLabel', label: 'Location', type: 'nullable-string', required: false, aliases: ['location', 'location label', 'place'] },
       { key: 'ownerAuthority', label: 'Responsible authority', type: 'nullable-string', required: false, aliases: ['authority', 'owner', 'responsible authority'] },
+      basisField,
+      provenanceNoteField,
     ],
   },
   {
@@ -298,6 +344,8 @@ export const ENTITY_SPECS: EntitySpec[] = [
       { key: 'resolvedAt', label: 'Resolved at', type: 'nullable-iso-date', required: false, aliases: ['resolved at', 'closed at', 'resolution date'] },
       { key: 'note', label: 'Note', type: 'nullable-string', required: false, aliases: ['note', 'resolution note', 'update note'] },
       { key: 'photoName', label: 'Photo file name', type: 'nullable-string', required: false, aliases: ['photo', 'photo name'] },
+      basisField,
+      provenanceNoteField,
     ],
   },
 ]

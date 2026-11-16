@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MicroCity system workflow</title>
+<style>
+  :root{
+    --ink:#15131F; --violet:#4235A8; --bright:#5245F8; --tint:#EFECFC;
+    --gold:#8A5A16; --goldsoft:#FBF0D6; --line:#D8D3E6; --gray:#595465; --paper:#FCFBF8;
+    --ivory:#E8E4D3;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;width:1600px;height:1000px;overflow:hidden;background:var(--paper);
+    font-family:"Segoe UI","Aptos",system-ui,sans-serif;color:var(--ink)}
+  .page{width:1600px;height:1000px;padding:50px 56px 30px;position:relative;display:flex;flex-direction:column}
+  .top{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:3px solid var(--ink);padding-bottom:16px}
+  .kicker{font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--violet);font-weight:700}
+  h1{margin:7px 0 0;font-size:31px;line-height:1.12;letter-spacing:-.02em;font-weight:700}
+  .top .note{width:380px;font-size:13.5px;line-height:1.5;color:var(--gray);text-align:right}
+  .lane{margin-top:20px}
+  .lanehead{display:flex;align-items:center;gap:14px;margin-bottom:10px}
+  .lanehead .tag{font-size:11px;letter-spacing:.18em;text-transform:uppercase;font-weight:800;padding:4px 10px;border:1.5px solid var(--violet);color:var(--violet);background:#fff}
+  .lanehead h2{margin:0;font-size:19px;letter-spacing:-.01em}
+  .lanehead .who{font-size:12.5px;color:var(--gray);margin-left:auto}
+  .steps{display:flex;align-items:stretch}
+  .step{flex:1;margin-right:32px;position:relative;border:1.5px solid var(--ink);background:#fff;padding:16px 16px 15px;min-height:244px;display:flex;flex-direction:column}
+  .step:last-child{margin-right:0}
+  .step:not(:last-child)::after{content:"";position:absolute;right:-25px;top:76px;width:17px;height:2px;background:var(--violet)}
+  .step:not(:last-child)::before{content:"";position:absolute;right:-25px;top:71px;border-left:7px solid var(--violet);border-top:5px solid transparent;border-bottom:5px solid transparent;z-index:1}
+  .step .n{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:var(--violet);color:#fff;font-size:13px;font-weight:800;margin-bottom:9px}
+  .step h3{margin:0 0 6px;font-size:15.5px;line-height:1.2;letter-spacing:-.005em}
+  .step p{margin:0;font-size:12.6px;line-height:1.48;color:var(--gray)}
+  .step .out{display:block;margin-top:auto;padding-top:12px;border-top:1px solid var(--line);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--violet);font-weight:700}
+  .issue .step{background:#fffdf7}
+  .issue .step .n{background:var(--gold)}
+  .issue .step:not(:last-child)::after{background:var(--gold)}
+  .issue .step:not(:last-child)::before{border-left-color:var(--gold)}
+  .issue .step .out{color:var(--gold)}
+  .audit{margin-top:auto;margin-bottom:52px;background:var(--ink);color:var(--ivory);padding:20px 24px;display:flex;align-items:center;gap:22px}
+  .audit .tag{font-size:11px;letter-spacing:.2em;text-transform:uppercase;font-weight:800;color:#F9B318;white-space:nowrap}
+  .audit p{margin:0;font-size:13px;line-height:1.45;color:#E8E4D3}
+  .audit .rule{margin-left:auto;font-size:11px;color:#B9B3C9;text-align:right;line-height:1.4;white-space:nowrap}
+  .foot{position:absolute;left:56px;right:56px;bottom:24px;display:flex;justify-content:space-between;font-size:11.5px;color:var(--gray)}
+  .foot b{color:var(--ink)}
+  .brand{position:absolute;right:56px;top:50px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray)}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <div>
+      <div class="kicker">Proposed workflow</div>
+      <h1>Two loops, one evidence trail: plan the campus, resolve the report</h1>
+    </div>
+    <div class="note">The planning loop runs on records and analysis; the issue loop runs on reports and work notes. Both write to the same audit trail.</div>
+  </div>
+
+  <div class="lane">
+    <div class="lanehead">
+      <span class="tag">Loop A</span>
+      <h2>Planning and decision loop</h2>
+      <span class="who">Estates prepares &middot; Administrator decides</span>
+    </div>
+    <div class="steps">
+      <div class="step"><span class="n">1</span><h3>Record or import</h3><p>Buildings, rooms and assets are entered on screen or imported from CSV and Excel. Every record states its source and whether the figure is recorded or estimated. Nothing enters the planning data without provenance.</p><span class="out">Source + provenance</span></div>
+      <div class="step"><span class="n">2</span><h3>Validate and store</h3><p>The server checks field types, dates and that each row belongs to the signed-in college. Imports are mapped per sheet, previewed, then appended or replaced behind an explicit safeguard. Rejected rows are reported, never silently dropped.</p><span class="out">Import history</span></div>
+      <div class="step"><span class="n">3</span><h3>Compute</h3><p>Deterministic rules compare demand with recorded room capacity, total electricity and water use from meter readings, and maintenance priority from category, severity and age. Every figure is arithmetic over stored records, not a model guess.</p><span class="out">Rule-based figures</span></div>
+      <div class="step"><span class="n">4</span><h3>Frame the gap</h3><p>Each gap is written in plain language: what is short, by how much, and which recorded options could close it. An option keeps its own note on cost or effort only where that note was entered.</p><span class="out">Options + trade-offs</span></div>
+      <div class="step"><span class="n">5</span><h3>Decide</h3><p>Only the administrator approves, rejects or defers. The decision keeps its actor, its time and a required note, so a reader months later can see why the choice was made.</p><span class="out">Decision log</span></div>
+      <div class="step"><span class="n">6</span><h3>Plan, report, print</h3><p>The plan and its print view carry the basis of every figure: recorded, estimated, illustrative or project assumption. An export is a point-in-time snapshot and says so.</p><span class="out">Point-in-time export</span></div>
+    </div>
+  </div>
+
+  <div class="lane issue">
+    <div class="lanehead">
+      <span class="tag" style="color:var(--gold);border-color:var(--gold)">Loop B</span>
+      <h2>Issue and maintenance loop</h2>
+      <span class="who">Any member reports &middot; Estates assigns &middot; Technician closes</span>
+    </div>
+    <div class="steps">
+      <div class="step"><span class="n">1</span><h3>Report a problem</h3><p>Any signed-in member files a report in three steps: what is broken, where it is (a room, or &ldquo;not sure&rdquo;), and a short description with an optional photo. The form returns a ticket number at once.</p><span class="out">Ticket number</span></div>
+      <div class="step"><span class="n">2</span><h3>Triage and assign</h3><p>Estates or the administrator sets severity and category, sees similar earlier reports, and assigns a technician. Assignment and priority are recorded choices, never inferred by a model.</p><span class="out">Owner + priority</span></div>
+      <div class="step"><span class="n">3</span><h3>Accept the job</h3><p>The technician sees only assigned work, ordered under To do, In progress and Done. Another technician&rsquo;s queue is not visible to them.</p><span class="out">Work queue</span></div>
+      <div class="step"><span class="n">4</span><h3>Work in progress</h3><p>Each status change is timestamped and appears on a timeline the reporter can also read. A ticket cannot change state without an actor and a time.</p><span class="out">Live status</span></div>
+      <div class="step"><span class="n">5</span><h3>Complete with evidence</h3><p>Moving a job to Done requires a work note and accepts an optional photo. The record stays open to audit and to later inspection.</p><span class="out">Work note</span></div>
+      <div class="step"><span class="n">6</span><h3>Reporter tracks it</h3><p>The reporter follows the same ticket under My reports and sees every update on it. Nothing is closed silently and nothing disappears from the queue.</p><span class="out">Shared record</span></div>
+    </div>
+  </div>
+
+  <div class="audit">
+    <div class="tag">Audit + integrity</div>
+    <p>Every create, update, import, role change and decision appends an audit entry with actor and time.</p>
+    <div class="rule">Missing is never zero.<br/>No AI can approve or assign.</div>
+  </div>
+
+  <div class="foot">
+    <div><b>Next cycle:</b> the report and its basis tags become the evidence for the next decision.</div>
+    <div>MicroCity &middot; proposed workflow &middot; 2026</div>
+  </div>
+</div>
+</body>
+</html>

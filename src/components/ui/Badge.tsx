@@ -16,14 +16,16 @@ export function Badge({
   children,
   tone = 'neutral',
   className = '',
+  wrap = false,
 }: {
   children: ReactNode
   tone?: Tone
   className?: string
+  wrap?: boolean
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded border px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-wider ${TONES[tone]} ${className}`}
+      className={`inline-flex items-center gap-1.5 ${wrap ? 'whitespace-normal text-left' : 'whitespace-nowrap'} rounded border px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-wider ${TONES[tone]} ${className}`}
     >
       {children}
     </span>

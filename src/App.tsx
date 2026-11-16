@@ -13,6 +13,7 @@ import IssuesMaintenance from './pages/dashboard/IssuesMaintenance'
 import PlanReport from './pages/dashboard/PlanReport'
 import DataCentre from './pages/dashboard/DataCentre'
 import Support from './pages/dashboard/Support'
+import Platform from './pages/Platform'
 import Administration from './pages/dashboard/Administration'
 import StudentHome from './pages/dashboard/StudentHome'
 import ReportProblem from './pages/dashboard/ReportProblem'
@@ -42,6 +43,16 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation()
   if (!ready) return <CheckingSession />
   if (!session) return <Navigate to="/signin" replace state={{ from: location.pathname }} />
+  // A platform administrator has no college membership, so it never opens the workspace.
+  if (session.platformAdmin) return <Navigate to="/platform" replace />
+  return <>{children}</>
+}
+
+function RequirePlatformAdmin({ children }: { children: ReactNode }) {
+  const { session, ready } = useAuth()
+  if (!ready) return <CheckingSession />
+  if (!session) return <Navigate to="/signin" replace />
+  if (!session.platformAdmin) return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
 
@@ -92,6 +103,16 @@ export default function App() {
 
           {/* Server-backed sign-in and registration */}
           <Route path="/signin" element={<SignIn />} />
+
+          {/* Platform administration: enabled by the server, not by hiding a link. */}
+          <Route
+            path="/platform"
+            element={
+              <RequirePlatformAdmin>
+                <Platform />
+              </RequirePlatformAdmin>
+            }
+          />
 
           {/* Authenticated dashboard shell; page-level role guards below.
               Record-level rules and cross-college checks are enforced again

@@ -6,7 +6,9 @@ MicroCity connects a college's physical records to day-to-day decisions: invento
 
 The working loop is **Inventory → Needs & Gaps → Priority → Action → Report**. All figures are produced by deterministic code from recorded data. Missing values stay missing; they are never treated as zero. The optional AI assistant only explains computed facts and is always labelled **“AI-generated, please verify”**.
 
-> **Demonstration status.** This repository is a local, server-backed demonstration using the synthetic dataset `microcity-demo-2026-10`. Every institution, person, room, meter, complaint and measurement in the base workspace is fictional. Do not put real college data into this demo until the production items in [Known limitations](#known-limitations) are addressed.
+> **Demonstration status.** This repository is a local, server-backed demonstration using the synthetic dataset `microcity-demo-2026-10`. Every institution, person, room, meter, complaint and measurement in the two demo colleges is fictional. Do not put real college data into this demo until the production items in [Known limitations](#known-limitations) are addressed.
+>
+> **Pilot workspace.** A third college, **Shree L.R. Tiwari College of Engineering**, is a pilot workspace. Its name, address and the two nearby bus stops are real location details found on public maps; **every other record is illustrative placeholder data imported from `Tiwari_College_illustrative_data_v2.xlsx` or seeded for the demonstration**. Nothing in it is a survey, measurement or finding about the real college. Tariffs and plan-option costs are deliberately blank. The header badge reads **Pilot: illustrative data** for this college and **Demo data** for the two demo colleges.
 
 ## Quick start
 
@@ -19,43 +21,67 @@ npm run dev
 
 Open the URL printed by Vite (normally `http://localhost:5173`). The Vite dev server mounts the same API under `/api`, so cookies and requests are same-origin. On first run the server creates `server/data/microcity.sqlite` and seeds the synthetic workspace.
 
-Production-style local run:
+### Production run
 
 ```bash
 npm run build
-npm start
+DEMO_MODE=true PORT=8787 npm start
 ```
 
-The production server defaults to `http://localhost:8787` and serves both `dist/` and the API. It refuses to serve the app until `npm run build` has run.
+The production server serves the built `dist/` client and the `/api` routes from one process, so browser sessions and cookies stay same-origin. It refuses to serve the app until `npm run build` has run. Environment variables for the server process:
+
+| Variable | Purpose |
+| --- | --- |
+| `PORT` | HTTP port (default `8787`) |
+| `MICROCITY_DB` | SQLite file path (default `server/data/microcity.sqlite`) |
+| `DEMO_MODE` | `true` shows the sign-in demo strip, enables `/api/auth/demo` and seeds the demo Platform admin and pilot accounts |
+| `AI_API_KEY`, `AI_MODEL`, and `AI_API_URL` or `AI_BASE_URL` | Optional AI explanation proxy (see [AI configuration](#ai-configuration-optional)) |
+
+On Windows PowerShell set the same values with `$env:PORT = '8787'` and so on before `npm start`. This is still a local HTTP demonstration; the production items in [Known limitations](#known-limitations) remain open.
 
 ### Checks
 
 ```bash
 npm run build   # TypeScript project build + Vite production bundle
 npm run lint    # Oxlint (0 errors; one advisory React fast-refresh warning)
-npm test        # Analysis, database, auth, formatting, complaint-rule and navigation suite (28 tests)
+npm test        # Analysis, database, auth, formatting, complaint-rule and navigation suite (183 tests)
 ```
 
 `npm test` uses `node --test --experimental-strip-types tests/*.test.ts`.
 
 ## Sample accounts
 
-Sample accounts are never listed or pre-filled on the sign-in page. This table exists only for local testing. **Every seeded password is `<username>-pass`** (for example, `sample-student-pass`). They exist only in the synthetic workspace and must not be reused with real data.
+Sample accounts are never listed or pre-filled on the sign-in page. This table exists only for local testing. Passwords are not recorded in this README: enable `DEMO_MODE=true` and use the demo strip, which fills the credentials of the selected college. They exist only in the synthetic workspace and must not be reused with real data.
 
-| Username | College | Role | Password |
-| --- | --- | --- | --- |
-| `sample-admin` | Vidya Nagar College (fictional) | Administrator | `sample-admin-pass` |
-| `sample-estates` | Vidya Nagar | Estates | `sample-estates-pass` |
-| `sample-maintenance` | Vidya Nagar | Maintenance | `sample-maintenance-pass` |
-| `sample-faculty` | Vidya Nagar | Faculty | `sample-faculty-pass` |
-| `sample-student` | Vidya Nagar | Student | `sample-student-pass` |
-| `sample-fd-admin` | Seva Nagar College (fictional) | Administrator | `sample-fd-admin-pass` |
-| `sample-fd-estates` | Seva Nagar | Estates | `sample-fd-estates-pass` |
-| `sample-fd-student` | Seva Nagar | Student | `sample-fd-student-pass` |
+| Username | College | Role |
+| --- | --- | --- |
+| `sample-admin` | Vidya Nagar College (fictional) | Administrator |
+| `sample-estates` | Vidya Nagar | Estates |
+| `sample-maintenance` | Vidya Nagar | Maintenance |
+| `sample-faculty` | Vidya Nagar | Faculty |
+| `sample-student` | Vidya Nagar | Student |
+| `sample-fd-admin` | Seva Nagar College (fictional) | Administrator |
+| `sample-fd-estates` | Seva Nagar | Estates |
+| `sample-fd-student` | Seva Nagar | Student |
 
 College codes are `VIDYA-NAGAR` and `SEVA-NAGAR`. Self-registration creates **student or faculty** accounts only and requires the college code; maintenance, estates and administrator accounts are created by an administrator from **Administration → Members and roles**. The server also refuses an administrator's attempt to remove their own administrator role.
 
-Set `DEMO_MODE=true` on the server to show the optional **Demo mode** strip on the sign-in page. Its buttons fill the Vidya Nagar account for each role; nothing is submitted until the user presses Sign in. With `DEMO_MODE` unset, the strip is not rendered and `/api/auth/demo` returns no accounts.
+Set `DEMO_MODE=true` on the server to show the optional **Demo mode** strip on the sign-in page. Its buttons fill the credentials of the selected college when demo accounts exist for it (Vidya Nagar, Seva Nagar and Tiwari); nothing is submitted until the user presses Sign in. With `DEMO_MODE` unset, the strip is not rendered, `/api/auth/demo` returns no accounts and the demo Platform admin is not seeded.
+
+### Platform admin and pilot accounts
+
+With `DEMO_MODE=true` the server seeds one **Platform admin** and five **pilot** accounts for the Tiwari workspace. Passwords are not repeated in this README; the demo strip fills them when it is enabled.
+
+| Username | College | Role |
+| --- | --- | --- |
+| `platform-admin` | none (platform) | Platform admin — can create colleges only |
+| `tiwari-admin` | Shree L.R. Tiwari College of Engineering | Administrator |
+| `tiwari-estates` | Tiwari | Estates |
+| `tiwari-maintenance` | Tiwari | Maintenance |
+| `tiwari-faculty` | Tiwari | Faculty |
+| `tiwari-student` | Tiwari | Student |
+
+A Platform admin has no college workspace: the platform page is its only area. The public **“Register your college”** flow is **designed, not implemented**; a college is created only by a Platform admin, who receives the generated college code and the first administrator's temporary password once, on screen. Students and faculty join with that college code; the college administrator creates Estates and Maintenance accounts.
 
 ## What is implemented
 
@@ -67,6 +93,7 @@ Set `DEMO_MODE=true` on the server to show the optional **Demo mode** strip on t
 - Capability matrix in `src/domain/permissions.ts` shared by the UI and re-checked by the API on every request.
 - Role-aware navigation, route guards and an explicit “Not available for your role” page.
 - College switching only for accounts with more than one membership. The selected college is sent as `X-College-Id` and re-validated server-side on every request; another college's ID receives `403 college-forbidden`.
+- **Platform admin** (seeded only in demo mode): one page creates a college from its name, address and official email. The server generates the college code and the first administrator's temporary password, shown once. Only a Platform admin can use the page; other signed-in roles receive `403` and anonymous callers `401`. A Platform admin has no college workspace and cannot read any college's records.
 - Students and faculty see only their own private campus reports. Maintenance sees only complaints assigned to them. Public issues are visible only to members of the reporting college.
 
 ### 01 Inventory
@@ -104,6 +131,7 @@ Buildings, rooms, assets, inspections, timetable bookings and shared public infr
 - Append and replace modes. Replace is blocked unless every populated campus category is included in the file. Public records can only be appended by an administrator.
 - Import history and audit trail record the source file, actor, time, mode and counts.
 - The expected external workbook remains **UNAVAILABLE** in `src/data/registry.ts` and is never impersonated. The Data Centre no longer displays the local file path or an “unavailable workbook” card.
+- The pilot workbook `Tiwari_College_illustrative_data_v2.xlsx` was mapped and imported through this step without renaming its columns. The preview showed per-row errors and warnings; applying wrote an import-history entry and an audit entry. Every row keeps its own `basis` tag from the workbook. Importing the same file again skips existing IDs instead of duplicating records; the two bus stops in `Public_Assets` stay Estimated with condition, daily users, method and authority not recorded.
 
 ### 07 Help and Administration
 - **Help** is a short page for every role: what the numbers mean, what the role can do and how AI is used. It contains no role matrix, sample credentials or AI environment details.
@@ -112,6 +140,7 @@ Buildings, rooms, assets, inspections, timetable bookings and shared public infr
 
 ### Appearance and time
 - The workspace uses a light theme at a 16px base size with one sans-serif font and text intended to meet 4.5:1 contrast. The dark ground and serif display face are limited to the landing hero.
+- The header badge reads **Demo data** for the synthetic demo colleges and **Pilot: illustrative data** for the Tiwari pilot. Every record row also shows its own basis tag (Measured, Estimated or Illustrative, or Not recorded) in Overview, Needs and Gaps, Resources, Issues and Maintenance, Plan and Report, and in the Markdown, CSV and print report.
 - Timestamps are displayed in **IST** (`Asia/Kolkata`, 24-hour clock, label `IST`). The database continues to store UTC values.
 - Seed tariffs are blank placeholders with the note **“Placeholder — enter the rate from your bill. Not a real tariff.”** Cost estimates appear only after a rate is entered; no seed tariff is presented as a real price.
 
@@ -139,6 +168,8 @@ Set these environment variables in the server process. `AI_API_URL` is the full 
 Required names: `AI_API_KEY`, `AI_MODEL`, and either `AI_API_URL` or `AI_BASE_URL`. Start the server from the terminal where those variables are configured.
 
 The provider must accept an OpenAI-compatible chat-completions request. AI tasks are authorised server-side: administrators and estates can use all tasks; maintenance can explain findings and categorise issues; students and faculty can categorise issues. The proxy returns `503` when unconfigured and `403` for a disallowed task. AI never creates, edits, approves, assigns or deletes records. Text typed in a report and the facts behind a finding are sent to the configured provider. Answers are number-checked against server-computed facts; unsupported answers are discarded.
+
+**AI number guard limits.** The guard checks numbers only. Quantity words such as “half”, “twice”, “double”, “dozen” and “several” are **not** validated, so an AI answer can still be wrong in wording even when its digits pass. Every AI answer is labelled **“AI-generated, please verify”** and is always shown beside the rule-based facts, never in place of them.
 
 ### Set AI configuration in PowerShell
 
@@ -179,6 +210,7 @@ Sign in as the sample administrator and explain the capacity finding `capacity-r
 ## Data and provenance
 
 - Base workspace: `microcity-demo-2026-10`, hand-authored fictional records seeded from `server/seed.ts`. It is labelled synthetic everywhere it appears. Generated 24 Oct 2026; no external source; not for redistribution.
+- Pilot workspace: `tiwari-illustrative-2026-11`. Buildings, rooms, assets, timetable/attendance, utility readings, complaints, public assets and nearby records were imported from the supplied workbook and keep their row basis (Illustrative), apart from the two bus stops, which are public-source records tagged Estimated with condition, daily users, method and authority left empty. The college name and address are real location details; nothing else is a finding about the real college.
 - Imported records: supplied by the signed-in user. The app records the file, actor and time but cannot verify the source.
 - Public infrastructure assets are shared; public issues are visible and editable only within the reporting college. Campus records are isolated by `college_id` and enforced in the API.
 - The externally expected workbook (`smartcampus_test_data.xlsx`) was not supplied. `src/data/registry.ts` marks it `unavailable` with the audit note. No local path is published, no loader reads it, and no record is presented as coming from it.
@@ -211,6 +243,8 @@ The following are **not** production-complete:
 - Local HTTP only. Before any real deployment add HTTPS, `Secure` cookies, managed secrets, database backup/restore and an independent security review.
 - The SQLite store is single-node; there is no replication, migration tooling or backup automation in this repository.
 - No password reset, email verification, MFA, invitation flow or user deactivation. Self-registration is open to student/faculty roles and requires a college code.
+- The public “Register your college” flow is designed but not implemented. College creation is limited to a Platform admin.
+- A college code is shared without approval or email verification: anyone who obtains a code can create a student or faculty account for that college. First-administrator temporary passwords are shown once and the holder is not forced to change them on first sign-in.
 - Photos are stored inline with the complaint record as a data URL in this demonstration; there is no object storage or image processing pipeline.
 - Import/report operations are synchronous. Very large workbooks should use a job queue in production.
 - AI-assisted narratives were not live-tested because no provider credentials were supplied. The fallback path and provider-unconfigured behaviour are implemented and tested.
@@ -221,7 +255,7 @@ The following are **not** production-complete:
 ## Verification summary
 
 - `npm run build`: passes.
-- `npm test`: 28/28 analysis, database, auth, formatting, complaint-rule and navigation tests pass. The auth suite covers the exact role-mismatch refusal with no session cookie, cross-college `403 college-forbidden`, registration college-code checks, staff self-registration refusal, admin-only staff creation and the `DEMO_MODE` gate.
+- `npm test`: 183/183 analysis, database, auth, formatting, complaint-rule and navigation tests pass. The auth suite covers the exact role-mismatch refusal with no session cookie, cross-college `403 college-forbidden`, registration college-code checks, staff self-registration refusal, admin-only staff creation and the `DEMO_MODE` gate. The Phase H suite covers Platform-admin-only college creation (`403`/`401` for other callers), a Platform admin having no workspace, cross-college isolation including a forged `X-College-Id`, import idempotency, the Tiwari pilot bootstrap (five accounts, Water limit 700 m3, 2 To do / 1 In progress / 1 Done maintenance jobs, two inspections, one option with a proposed decision, three student reports, unrecorded bus-stop details) and basis tags in the Markdown and CSV report.
 - `npm run lint`: 0 errors; one advisory React fast-refresh warning in `src/auth/auth-context.tsx` (hook and provider exported from the same module).
 - Fresh-database check: a new SQLite file (never the existing one) is created in a temporary directory; seeding, the college-code migration and the seed-tariff neutralisation complete without errors, and reopening does not duplicate records.
 - End-to-end browser checks covered: landing → sign in; role-aware navigation; student/faculty/maintenance route restrictions; student private-report scope; maintenance assigned-only complaints; cross-college API denial; building create/edit/delete; import preview/apply with visible success state; replace-mode safeguard; sign-out to landing; mobile drawer open/close; logo to landing; rule-based explanation and query fallback.

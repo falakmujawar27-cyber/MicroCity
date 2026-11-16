@@ -6,6 +6,8 @@ import Stat from '../../components/ui/Stat'
 import Modal from '../../components/ui/Modal'
 import FindingExplainer from '../../components/dashboard/FindingExplainer'
 import { SeverityBadge, Badge } from '../../components/ui/Badge'
+import BasisTag from '../../components/ui/BasisTag'
+import type { EvidenceBasis } from '../../domain/types'
 import { useAuth } from '../../auth/auth-context'
 import { isCriticalGapItem, slotsWithoutEnrolledNumber } from '../../domain/analysis'
 import type { Finding } from '../../domain/analysis'
@@ -53,6 +55,14 @@ export default function Overview() {
   const slotsMissingAttendance = data.timetableSlots.filter((slot) => slot.attendance === null)
   const slotsMissingEnrolled = slotsWithoutEnrolledNumber(data.timetableSlots)
   const roomsById = new Map(data.rooms.map((room) => [room.id, room]))
+  const basisById = new Map<string, EvidenceBasis | null | undefined>()
+  for (const record of [...data.rooms, ...data.buildings, ...data.assets, ...data.complaints, ...data.nearbyAssets, ...data.planOptions]) {
+    basisById.set(record.id, record.basis)
+  }
+  const basisForFinding = (finding: Finding) => {
+    const ids = finding.subjectIds.length > 0 ? finding.subjectIds : [finding.id]
+    return ids.map((id) => basisById.get(id)).find((basis) => Boolean(basis))
+  }
 
   const loop = [
     {
@@ -121,7 +131,7 @@ export default function Overview() {
                 const nearby = analysis.nearby.find((row) => row.type === finding.facts.nearbyType)
                 const nearbyAsset = nearby?.records.find((asset) => asset.condition === 'poor' || asset.condition === 'fair')
                 const action = nearbyAsset ? {
-                  label: `Report to ${nearbyAsset.responsibleAuthority}`,
+                  label: nearbyAsset.responsibleAuthority ? `Report to ${nearbyAsset.responsibleAuthority}` : 'Report an issue',
                   to: `/dashboard/issues-maintenance?nearbyAsset=${encodeURIComponent(nearbyAsset.id)}`,
                 } : actionFor(finding)
                 return (
@@ -129,6 +139,7 @@ export default function Overview() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <SeverityBadge severity={finding.severity} />
+                        <BasisTag basis={nearbyAsset?.basis ?? basisForFinding(finding)} />
                         <span className="font-mono text-[0.5625rem] uppercase tracking-widest text-ivory/40">
                           {nearby ? 'Nearby area' : titleCase(finding.module)}
                         </span>
@@ -253,6 +264,7 @@ export default function Overview() {
                   <th scope="col" className="px-3 py-2 font-medium">Room</th>
                   <th scope="col" className="px-3 py-2 font-medium">Starts (IST)</th>
                   <th scope="col" className="px-3 py-2 font-medium">Enrolled</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Basis</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-violet/20">
@@ -270,6 +282,7 @@ export default function Overview() {
                         formatNumber(slot.expectedAttendance)
                       )}
                     </td>
+                    <td className="px-3 py-2"><BasisTag basis={slot.basis} /></td>
                   </tr>
                 ))}
               </tbody>

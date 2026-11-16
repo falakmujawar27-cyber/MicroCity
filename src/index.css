@@ -161,13 +161,12 @@
   color: #ffffff;
 }
 
-/* Primary buttons need a full 44px touch target on small screens. */
-@media (max-width: 640px) {
-  .theme-workspace button,
-  .theme-workspace [role="button"],
-  .theme-workspace a[data-button] {
-    min-height: 44px;
-  }
+/* Every workspace button carries a full 44x44 CSS-pixel target. */
+.theme-workspace button,
+.theme-workspace [role="button"],
+.theme-workspace a[data-button] {
+  min-height: 44px;
+  min-width: 44px;
 }
 
 /*

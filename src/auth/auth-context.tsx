@@ -82,6 +82,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const loadWorkspace = useCallback(async (nextSession: SessionInfo, preferred: string | null) => {
+    // A platform administrator has no college membership by design.
+    if (nextSession.platformAdmin) {
+      setSession(nextSession)
+      setWorkspace(null)
+      setActiveCollegeId(null)
+      setAi(null)
+      setError(null)
+      setLoadingWorkspace(false)
+      return
+    }
     const collegeId = pickCollege(nextSession, preferred)
     if (!collegeId) {
       setSession(nextSession)

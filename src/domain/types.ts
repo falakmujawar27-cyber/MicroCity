@@ -9,7 +9,10 @@
  * - Timestamps are ISO 8601 strings.
  */
 
-export type UserRole = 'admin' | 'estates' | 'maintenance' | 'faculty' | 'student'
+export type UserRole = 'platform_admin' | 'admin' | 'estates' | 'maintenance' | 'faculty' | 'student'
+
+/** Demo colleges carry the authored demonstration set; pilot colleges carry illustrative imports. */
+export type CollegeMode = 'demo' | 'pilot'
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical'
 export type AssetCondition = 'good' | 'fair' | 'poor'
@@ -58,10 +61,13 @@ export interface AuthUser {
   username: string
   displayName: string
   sample: boolean
+  /** True only for the platform operator account, which belongs to no college. */
+  platformAdmin?: boolean
 }
 
 export interface SessionInfo {
   user: AuthUser
+  platformAdmin?: boolean
   memberships: Membership[]
 }
 
@@ -72,20 +78,33 @@ export interface UserSummary {
   sample: boolean
 }
 
-export interface Building {
+/**
+ * Row-level provenance. Every imported row keeps the basis tag from its own
+ * source line; seed and manual rows leave it unset and the interface falls
+ * back to the dataset label.
+ */
+export interface RowProvenance {
+  basis?: EvidenceBasis | null
+  provenanceNote?: string | null
+}
+
+export interface Building extends RowProvenance {
   id: string
   collegeId: string
   name: string
   address: string | null
   notes: string | null
+  floors?: number | null
+  hasLift?: string | null
 }
 
-export interface Room {
+export interface Room extends RowProvenance {
   id: string
   collegeId: string
   buildingId: string
   code: string
   name: string | null
+  roomType?: string | null
   floor: string | null
   areaM2: number | null
   capacity: number | null
@@ -93,7 +112,7 @@ export interface Room {
   notes: string | null
 }
 
-export interface TimetableSlot {
+export interface TimetableSlot extends RowProvenance {
   id: string
   collegeId: string
   roomId: string
@@ -123,7 +142,7 @@ export interface AttendanceRecord {
   updatedAt: string
 }
 
-export interface UtilityMeter {
+export interface UtilityMeter extends RowProvenance {
   id: string
   collegeId: string
   buildingId: string
@@ -135,7 +154,7 @@ export interface UtilityMeter {
   measurementType?: MeasurementType
 }
 
-export interface UtilityReading {
+export interface UtilityReading extends RowProvenance {
   id: string
   collegeId: string
   meterId: string
@@ -159,10 +178,13 @@ export interface Tariff {
   note: string | null
 }
 
-export interface Asset {
+export interface Asset extends RowProvenance {
   id: string
   collegeId: string
   buildingId: string | null
+  /** Imported rows may carry a room reference; it is not used by any rule. */
+  roomId?: string | null
+  quantity?: number | null
   name: string
   category: string
   installedAt: string | null
@@ -173,7 +195,7 @@ export interface Asset {
   notes: string | null
 }
 
-export interface Inspection {
+export interface Inspection extends RowProvenance {
   id: string
   collegeId: string
   assetId: string
@@ -186,7 +208,7 @@ export interface Inspection {
   result?: InspectionResult | null
 }
 
-export interface Complaint {
+export interface Complaint extends RowProvenance {
   id: string
   collegeId: string
   /** Human-readable reference, generated per college for new reports. */
@@ -257,8 +279,10 @@ export interface NearbyAsset {
   condition: AssetCondition | null
   dailyUsers: number | null
   usersMethod: string | null
-  responsibleAuthority: string
+  /** Null when nobody has identified the authority yet; never invented. */
+  responsibleAuthority: string | null
   basis: EvidenceBasis
+  provenanceNote?: string | null
 }
 
 export interface UrbanAsset {
@@ -287,7 +311,7 @@ export interface UrbanIssue {
   photoDataUrl: string | null
 }
 
-export interface PlanOption {
+export interface PlanOption extends RowProvenance {
   id: string
   collegeId: string
   title: string
@@ -306,7 +330,7 @@ export interface PlanOption {
   evidence: string
 }
 
-export interface Decision {
+export interface Decision extends RowProvenance {
   id: string
   collegeId: string
   optionId: string
@@ -422,7 +446,15 @@ export interface AuditEntry {
 }
 
 export interface WorkspacePayload {
-  activeCollege: { id: string; name: string; role: UserRole }
+  activeCollege: {
+    id: string
+    name: string
+    role: UserRole
+    mode: CollegeMode
+    code: string | null
+    address: string | null
+    email: string | null
+  }
   memberships: Membership[]
   provenance: DatasetProvenance
   dataset: DatasetSources
@@ -493,6 +525,7 @@ export interface RegisterInput {
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {
+  platform_admin: 'Platform admin',
   admin: 'Administrator',
   estates: 'Estates',
   maintenance: 'Maintenance',

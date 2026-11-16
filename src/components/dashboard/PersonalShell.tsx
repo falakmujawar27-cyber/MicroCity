@@ -88,7 +88,7 @@ export default function PersonalShell() {
           <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
               <p className="font-heading text-lg font-semibold tracking-tight text-ivory">MicroCity</p>
-              <p className="truncate font-mono text-[0.625rem] uppercase tracking-widest text-gold">
+              <p className="break-words font-mono text-[0.625rem] uppercase tracking-widest text-gold">
                 {ROLE_LABELS[role]} · {college?.name ?? ''}
               </p>
             </div>

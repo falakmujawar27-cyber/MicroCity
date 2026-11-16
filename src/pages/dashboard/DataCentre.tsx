@@ -33,7 +33,21 @@ function missingRequired(draft: SheetDraft): FieldSpec[] {
   const spec = ENTITY_BY_NAME.get(draft.entity)
   if (!spec) return []
   const targets = new Set(Object.values(draft.mapping).filter(Boolean))
-  return requiredFields(spec).filter((field) => !targets.has(field.key))
+  const headers = new Set(draft.headers.map(normaliseKey))
+  const satisfiedByRule = (key: string): boolean => {
+    if (draft.entity === 'timetableSlots' && (key === 'startsAt' || key === 'endsAt')) {
+      return headers.has('date') && headers.has('start') && headers.has('end')
+    }
+    if (draft.entity === 'complaints' && key === 'roomChoice') {
+      return targets.has('roomChoice') || targets.has('roomId')
+    }
+    if (draft.entity === 'nearbyAssets' && key === 'distanceBasis') return true
+    if (draft.entity === 'assets' && key === 'category') return targets.has('name')
+  if (draft.entity === 'rooms' && key === 'code') return targets.has('id')
+    if (draft.entity === 'utilityReadings' && key === 'unit') return targets.has('meterId')
+    return false
+  }
+  return requiredFields(spec).filter((field) => !targets.has(field.key) && !satisfiedByRule(field.key))
 }
 
 function sampleValue(sheet: ParsedSheet, header: string): string {
@@ -231,7 +245,11 @@ export default function DataCentre() {
             <div>
               <dt className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Base data</dt>
               <dd className="mt-1 text-ivory/80">
-                {workspace.provenance.synthetic ? 'Fictional demonstration data' : 'Recorded source'}
+                {workspace.activeCollege.mode === 'pilot'
+                  ? 'Illustrative pilot data'
+                  : workspace.provenance.synthetic
+                    ? 'Fictional demonstration data'
+                    : 'Recorded source'}
               </dd>
             </div>
             <div>

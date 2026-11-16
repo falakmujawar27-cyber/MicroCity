@@ -31,6 +31,7 @@ const DEMO_LABELS: Record<UserRole, string> = {
   maintenance: 'Maintenance',
   estates: 'Estates',
   admin: 'Admin',
+  platform_admin: 'Platform admin',
 }
 
 function roleName(role: UserRole | null): string {
@@ -38,7 +39,14 @@ function roleName(role: UserRole | null): string {
 }
 
 function isRole(value: string | null): value is UserRole {
-  return value === 'student' || value === 'faculty' || value === 'maintenance' || value === 'estates' || value === 'admin'
+  return (
+    value === 'student' ||
+    value === 'faculty' ||
+    value === 'maintenance' ||
+    value === 'estates' ||
+    value === 'admin' ||
+    value === 'platform_admin'
+  )
 }
 
 export default function SignIn() {
@@ -111,6 +119,12 @@ export default function SignIn() {
     setStep('credentials')
   }
 
+  const collegeDemoAccounts = demo.accounts.filter(
+    (account) => account.collegeId === collegeId && account.role !== 'platform_admin',
+  )
+  const platformDemo = demo.accounts.find((account) => account.role === 'platform_admin') ?? null
+  const isPlatformSignIn = role === 'platform_admin'
+
   const submitSignIn = async (event: FormEvent) => {
     event.preventDefault()
     if (!role) {
@@ -119,9 +133,9 @@ export default function SignIn() {
     }
     setBusy(true)
     setError(null)
-    const result = await signIn(username.trim(), password, collegeId || undefined, role)
+    const result = await signIn(username.trim(), password, isPlatformSignIn ? undefined : collegeId || undefined, role)
     setBusy(false)
-    if (result.ok) navigate(from, { replace: true })
+    if (result.ok) navigate(isPlatformSignIn ? '/platform' : from, { replace: true })
     else setError(result.error ?? 'The request failed.')
   }
 
@@ -197,10 +211,10 @@ export default function SignIn() {
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
-                onClick={() => navigate('/dashboard')}
+                onClick={() => navigate(session.platformAdmin ? '/platform' : '/dashboard')}
                 className="inline-flex min-h-11 items-center justify-center rounded-md bg-violet px-5 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring"
               >
-                Open workspace
+                {session.platformAdmin ? 'Open platform page' : 'Open workspace'}
               </button>
               <button
                 type="button"
@@ -242,6 +256,16 @@ export default function SignIn() {
             >
               Create a student or faculty account
             </button>
+            <p className="mt-6 border-t border-violet/20 pt-4 text-sm text-ivory/60">
+              Platform operator?{' '}
+              <button
+                type="button"
+                onClick={() => chooseRole('platform_admin')}
+                className="inline-flex min-h-11 items-center font-semibold text-violet-bright underline decoration-violet/40 underline-offset-4 focus-ring"
+              >
+                Sign in as Platform admin
+              </button>
+            </p>
           </div>
         ) : step === 'credentials' ? (
           <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
@@ -264,24 +288,33 @@ export default function SignIn() {
                   </button>
                 </div>
 
-                <label htmlFor="college" className="mb-1 block font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-ivory/70">
-                  College
-                </label>
-                <select
-                  id="college"
-                  value={collegeId}
-                  onChange={(event) => setCollegeId(event.target.value)}
-                  required
-                  className="mb-4 min-h-11 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
-                >
-                  {colleges.length === 0 && <option value="">Loading colleges…</option>}
-                  {colleges.map((college) => (
-                    <option key={college.id} value={college.id}>
-                      {college.name}
-                    </option>
-                  ))}
-                </select>
-                {collegesError && <p className="mb-3 text-sm text-status-error-dark">{collegesError}</p>}
+                {isPlatformSignIn ? (
+                  <p className="mb-4 border border-violet/30 bg-violet/5 px-3 py-2.5 text-sm text-ivory/70">
+                    A Platform admin account belongs to no college. It can create colleges but cannot read
+                    any college's records.
+                  </p>
+                ) : (
+                  <>
+                    <label htmlFor="college" className="mb-1 block font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-ivory/70">
+                      College
+                    </label>
+                    <select
+                      id="college"
+                      value={collegeId}
+                      onChange={(event) => setCollegeId(event.target.value)}
+                      required
+                      className="mb-4 min-h-11 w-full rounded-md border border-violet/40 bg-ink px-3 text-base text-ivory focus-ring"
+                    >
+                      {colleges.length === 0 && <option value="">Loading colleges…</option>}
+                      {colleges.map((college) => (
+                        <option key={college.id} value={college.id}>
+                          {college.name}
+                        </option>
+                      ))}
+                    </select>
+                    {collegesError && <p className="mb-3 text-sm text-status-error-dark">{collegesError}</p>}
+                  </>
+                )}
 
                 <label htmlFor="username" className="mb-1 block font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-ivory/70">
                   Username
@@ -310,7 +343,7 @@ export default function SignIn() {
 
                 <button
                   type="submit"
-                  disabled={busy || !collegeId}
+                  disabled={busy || (!isPlatformSignIn && !collegeId)}
                   className="inline-flex min-h-12 w-full items-center justify-center rounded-md bg-violet px-4 text-sm font-semibold text-ivory hover:bg-violet/85 focus-ring disabled:opacity-50"
                 >
                   {busy ? 'Signing in…' : `Sign in as ${roleName(role)}`}
@@ -329,12 +362,14 @@ export default function SignIn() {
                 <div className="mt-6 border border-gold/60 bg-gold/5 p-5">
                   <p className="font-mono text-[0.6875rem] uppercase tracking-[0.18em] text-gold">Demo mode</p>
                   <p className="mt-2 text-sm leading-relaxed text-ivory/70">
-                    Choose a role to fill in the demonstration credentials. Nothing is submitted until you press Sign in.
+                    Choose a role to fill in the demonstration credentials for{' '}
+                    <span className="text-ivory">{colleges.find((college) => college.id === collegeId)?.name ?? 'the selected college'}</span>.
+                    Nothing is submitted until you press Sign in.
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {demo.accounts.map((account) => (
+                    {collegeDemoAccounts.map((account) => (
                       <button
-                        key={account.role}
+                        key={account.username}
                         type="button"
                         onClick={() => fillDemo(account)}
                         className="inline-flex min-h-11 items-center justify-center rounded-md border border-gold/60 bg-obsidian px-3 text-sm font-semibold text-ivory hover:bg-gold/10 focus-ring"
@@ -342,7 +377,19 @@ export default function SignIn() {
                         Try as {DEMO_LABELS[account.role]}
                       </button>
                     ))}
+                    {collegeDemoAccounts.length === 0 && (
+                      <p className="text-sm text-ivory/60">No demo accounts exist for this college yet.</p>
+                    )}
                   </div>
+                  {platformDemo && (
+                    <button
+                      type="button"
+                      onClick={() => fillDemo(platformDemo)}
+                      className="mt-4 inline-flex min-h-11 items-center justify-center rounded-md border border-gold/60 bg-obsidian px-3 text-sm font-semibold text-ivory hover:bg-gold/10 focus-ring"
+                    >
+                      Try as Platform admin
+                    </button>
+                  )}
                 </div>
               )}
             </div>

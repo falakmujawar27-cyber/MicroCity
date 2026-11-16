@@ -54,14 +54,18 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <span className="truncate font-heading text-lg font-semibold tracking-tight text-ivory">
+          <span className="break-words font-heading text-lg font-semibold tracking-tight text-ivory">
             {current}
           </span>
           <span
             className="inline-flex items-center gap-1.5 border border-gold/50 px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-widest text-gold"
           >
             <span aria-hidden="true" className="h-1.5 w-1.5 bg-gold" />
-            {workspace?.provenance.synthetic ? 'Demo data' : 'Recorded data'}
+            {workspace?.activeCollege.mode === 'pilot'
+              ? 'Pilot: illustrative data'
+              : workspace?.provenance.synthetic
+                ? 'Demo data'
+                : 'Recorded data'}
           </span>
         </div>
 
@@ -83,7 +87,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               </select>
             </label>
           ) : (
-            <span className="hidden max-w-48 truncate text-xs text-ivory/60 sm:block">
+            <span className="hidden max-w-72 truncate text-xs text-ivory/60 sm:block">
               {workspace?.activeCollege.name}
             </span>
           )}
@@ -91,7 +95,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
           {session ? (
             <details key={pathname} className="relative hidden sm:block">
               <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-md border border-violet/40 px-3 py-1.5 text-xs font-semibold text-ivory/80 hover:bg-violet/15 focus-ring [&::-webkit-details-marker]:hidden">
-                <span className="max-w-36 truncate text-sm text-ivory/80">{session.user.displayName}</span>
+                <span className="max-w-52 truncate text-sm text-ivory/80">{session.user.displayName}</span>
                 {role && (
                   <span className="rounded-md border border-violet/40 px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-wider text-violet-bright">
                     {ROLE_LABELS[role]}
@@ -105,7 +109,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               >
                 <div className="border-b border-violet/20 px-3 py-2.5">
                   <p className="truncate text-sm text-ivory">{session.user.displayName}</p>
-                  <p className="mt-0.5 truncate font-mono text-[0.625rem] text-ivory/45">
+                  <p className="mt-0.5 break-words font-mono text-[0.625rem] text-ivory/45">
                     {session.user.username} · {workspace?.activeCollege.name ?? 'No college'}
                   </p>
                 </div>

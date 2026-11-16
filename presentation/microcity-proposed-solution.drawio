@@ -1,0 +1,171 @@
+<mxfile host="app.diagrams.net" modified="2026-11-15T13:08:00.000Z" agent="MicroCity" version="24.7.17" type="device">
+  <diagram id="microcity-proposed-solution" name="MicroCity Proposed Solution">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0" background="#F7F5EE">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="header-kicker" value="MICROCITY · CAMPUS INFRASTRUCTURE PLANNING &amp; MANAGEMENT" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#4235A8;fontSize=12;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="250" y="24" width="1100" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="header-title" value="FEATURES OF THE PROPOSED SOLUTION" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#15131F;fontSize=32;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="180" y="50" width="1240" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="header-subtitle" value="One college-scoped workspace turns recorded campus evidence into accountable action." style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#595465;fontSize=15;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="280" y="100" width="1040" height="28" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="feature-inventory" value="" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#4235A8;strokeColor=#E8E4D3;strokeWidth=3;" vertex="1" parent="1">
+          <mxGeometry x="520" y="215" width="150" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="feature-needs" value="" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#8A5A16;strokeColor=#E8E4D3;strokeWidth=3;" vertex="1" parent="1">
+          <mxGeometry x="930" y="215" width="150" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="feature-resources" value="" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#3D6B35;strokeColor=#E8E4D3;strokeWidth=3;" vertex="1" parent="1">
+          <mxGeometry x="520" y="585" width="150" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="feature-issues" value="" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#8C2F25;strokeColor=#E8E4D3;strokeWidth=3;" vertex="1" parent="1">
+          <mxGeometry x="930" y="585" width="150" height="150" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="center-core" value="" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#15131F;strokeColor=#F9B318;strokeWidth=3;" vertex="1" parent="1">
+          <mxGeometry x="620" y="295" width="360" height="360" as="geometry"/>
+        </mxCell>
+        <mxCell id="building-left" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4235A8;strokeColor=#E8E4D3;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="726" y="371" width="42" height="54" as="geometry"/>
+        </mxCell>
+        <mxCell id="building-main" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#5245F8;strokeColor=#E8E4D3;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="778" y="346" width="46" height="79" as="geometry"/>
+        </mxCell>
+        <mxCell id="building-right" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8A5A16;strokeColor=#E8E4D3;strokeWidth=1.5;" vertex="1" parent="1">
+          <mxGeometry x="834" y="365" width="42" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="window-1" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="737" y="382" width="8" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="window-2" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="751" y="382" width="8" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="window-3" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="737" y="397" width="8" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="window-4" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="751" y="397" width="8" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="window-5" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="789" y="360" width="9" height="9" as="geometry"/>
+        </mxCell>
+        <mxCell id="window-6" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="804" y="360" width="9" height="9" as="geometry"/>
+        </mxCell>
+        <mxCell id="window-7" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="789" y="378" width="9" height="9" as="geometry"/>
+        </mxCell>
+        <mxCell id="window-8" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="804" y="378" width="9" height="9" as="geometry"/>
+        </mxCell>
+        <mxCell id="window-9" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="845" y="376" width="8" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="window-10" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="859" y="376" width="8" height="8" as="geometry"/>
+        </mxCell>
+        <mxCell id="center-name" value="MICROCITY" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#F9B318;fontSize=14;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="680" y="447" width="240" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="center-title" value="CAMPUS&lt;br&gt;INTELLIGENCE" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#E8E4D3;fontSize=23;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="660" y="476" width="280" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="center-caption" value="RECORD  ·  UNDERSTAND  ·  IMPROVE" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#C6C1D0;fontSize=11;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="665" y="551" width="270" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="center-scope" value="COLLEGE-SCOPED RECORDS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#292536;strokeColor=#5245F8;fontColor=#E8E4D3;fontSize=10;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="690" y="592" width="220" height="27" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="inventory-box-1" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#E8E4D3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="563" y="257" width="24" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="inventory-box-2" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#E8E4D3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="596" y="257" width="24" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="inventory-box-3" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#E8E4D3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="563" y="287" width="24" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="inventory-box-4" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#E8E4D3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="596" y="287" width="24" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="needs-axis-x" value="" style="line;html=1;strokeColor=#E8E4D3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="966" y="310" width="56" height="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="needs-axis-y" value="" style="line;html=1;strokeColor=#E8E4D3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="966" y="266" width="1" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="needs-bar-1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="978" y="290" width="10" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="needs-bar-2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8E4D3;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="995" y="278" width="10" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="needs-bar-3" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F9B318;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="1012" y="261" width="10" height="49" as="geometry"/>
+        </mxCell>
+        <mxCell id="resource-icon" value="kWh&lt;br&gt;m³" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#E8E4D3;fontSize=19;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="548" y="628" width="95" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="issue-icon" value="✓" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#E8E4D3;fontSize=48;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="953" y="625" width="104" height="67" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="inventory-heading" value="01 · CAMPUS INVENTORY" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;whiteSpace=wrap;fontColor=#4235A8;fontSize=19;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="65" y="263" width="405" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="inventory-copy" value="Buildings, rooms, capacities, assets and inspections in one college-scoped register. Keep source and record basis visible." style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=top;whiteSpace=wrap;fontColor=#595465;fontSize=14;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="65" y="304" width="405" height="73" as="geometry"/>
+        </mxCell>
+        <mxCell id="needs-heading" value="02 · NEEDS &amp; GAPS" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#8A5A16;fontSize=19;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="263" width="415" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="needs-copy" value="Rule-based capacity and condition findings show the evidence, threshold and source. Missing data stays missing; AI does not calculate." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#595465;fontSize=14;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="304" width="415" height="73" as="geometry"/>
+        </mxCell>
+        <mxCell id="resources-heading" value="03 · RESOURCE MONITORING" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;whiteSpace=wrap;fontColor=#3D6B35;fontSize=19;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="65" y="630" width="405" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="resources-copy" value="Electricity and water readings, trends, tagged measurement basis and flagged spikes. Estimates stay distinct from measured values." style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=top;whiteSpace=wrap;fontColor=#595465;fontSize=14;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="65" y="670" width="405" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="issues-heading" value="04 · ISSUE TO RESOLUTION" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#8C2F25;fontSize=19;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="630" width="415" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="issues-copy" value="College-scoped reports move through staff triage, assignment and evidence-backed maintenance updates. Reporters can follow the same ticket." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#595465;fontSize=14;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="670" width="415" height="75" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="planning-band" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D8D3E6;strokeWidth=1.2;" vertex="1" parent="1">
+          <mxGeometry x="50" y="785" width="1500" height="72" as="geometry"/>
+        </mxCell>
+        <mxCell id="planning-label" value="PLAN &amp; REPORT" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#4235A8;fontSize=14;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="75" y="800" width="220" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="planning-copy" value="Compare recorded options · administrators own approve / reject / defer · point-in-time reports show Measured, Estimated, Illustrative or Missing basis." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#595465;fontSize=13;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="300" y="797" width="1215" height="43" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ai-band" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0EDFC;strokeColor=#B9B0E8;strokeWidth=1.2;" vertex="1" parent="1">
+          <mxGeometry x="50" y="872" width="1500" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="ai-label" value="OPTIONAL AI" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#4235A8;fontSize=13;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="75" y="885" width="180" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="ai-copy" value="Explanation and validated suggestions only. Every answer is labelled “AI-generated, please verify”; people confirm suggestions. AI cannot calculate, change priority, approve or edit records." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#15131F;fontSize=12;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="255" y="881" width="1260" height="46" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="footer" value="MICROCITY · PROPOSED SOLUTION · CALCULATIONS BEFORE AI" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#595465;fontSize=10;fontStyle=1;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="200" y="956" width="1200" height="20" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -6,6 +6,7 @@ import Panel from '../../components/ui/Panel'
 import Tabs from '../../components/ui/Tabs'
 import Stat from '../../components/ui/Stat'
 import { Badge, SeverityBadge, StatusBadge } from '../../components/ui/Badge'
+import BasisTag from '../../components/ui/BasisTag'
 import Notice from '../../components/ui/Notice'
 import RecordDialog from '../../components/ui/RecordDialog'
 import type { FormField } from '../../components/ui/RecordDialog'
@@ -576,6 +577,7 @@ export default function IssuesMaintenance() {
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <Badge tone="violet">Campus</Badge>
+                              <BasisTag basis={complaint.basis} />
                               <SeverityBadge severity={complaint.severity} />
                               <StatusBadge status={complaint.status} />
                               {ranked && (

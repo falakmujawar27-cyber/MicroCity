@@ -115,9 +115,9 @@ export default function NearbyNeeds({ initialType }: { initialType: string | nul
               <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-ivory break-words">{asset.locationDescription}</h3><Badge tone="neutral">{titleCase(asset.basis)}</Badge></div>
               <p>Distance: {asset.distanceMetres} m · {titleCase(asset.distanceBasis)}. Condition: {asset.condition ? titleCase(asset.condition) : 'Not recorded'}.</p>
               <p>Estimated daily users: {asset.dailyUsers ?? 'Not entered'}. How obtained: {formatNearbyUsersMethod(asset.usersMethod)}</p>
-              <p>Responsible authority: {asset.responsibleAuthority}</p>
+              <p>Responsible authority: {asset.responsibleAuthority ?? 'Not recorded'}</p>
               <div className="flex flex-wrap gap-2">
-                <Link to={`/dashboard/issues-maintenance?nearbyAsset=${encodeURIComponent(asset.id)}`} className="rounded border border-violet/40 px-3 py-2 text-sm text-violet-bright focus-ring">Report to {asset.responsibleAuthority}</Link>
+                <Link to={`/dashboard/issues-maintenance?nearbyAsset=${encodeURIComponent(asset.id)}`} className="rounded border border-violet/40 px-3 py-2 text-sm text-violet-bright focus-ring">{asset.responsibleAuthority ? `Report to ${asset.responsibleAuthority}` : 'Report an issue'}</Link>
                 {admin && <>
                   <button type="button" onClick={() => setDraft({ ...asset })} className="rounded border border-violet/40 px-3 py-2 text-sm text-violet-bright focus-ring">Edit asset</button>
                   <button type="button" onClick={() => setDeleting(asset)} className="rounded border border-violet/40 px-3 py-2 text-sm text-status-error-dark focus-ring">Delete asset</button>

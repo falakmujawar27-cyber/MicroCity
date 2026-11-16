@@ -5,6 +5,7 @@ import Panel from '../../components/ui/Panel'
 import Tabs from '../../components/ui/Tabs'
 import Stat from '../../components/ui/Stat'
 import { Badge, StatusBadge } from '../../components/ui/Badge'
+import BasisTag from '../../components/ui/BasisTag'
 import Notice from '../../components/ui/Notice'
 import RecordDialog from '../../components/ui/RecordDialog'
 import type { FormField } from '../../components/ui/RecordDialog'
@@ -416,6 +417,7 @@ export default function PlanReport() {
                     <thead>
                       <tr className="border-b border-violet/25 font-mono text-[0.625rem] uppercase tracking-wider text-ivory/50">
                         <th scope="col" className="px-4 py-3 font-normal">Option</th>
+                        <th scope="col" className="px-4 py-3 font-normal">Basis</th>
                         <th scope="col" className="px-4 py-3 font-normal">Type</th>
                         <th scope="col" className="px-4 py-3 text-right font-normal">Capital cost</th>
                         <th scope="col" className="px-4 py-3 text-right font-normal">Net annual benefit</th>
@@ -428,6 +430,7 @@ export default function PlanReport() {
                       {plan.options.map((option) => (
                         <tr key={option.optionId} className="border-b border-violet/15 last:border-0">
                           <th scope="row" className="px-4 py-3 font-medium text-ivory">{option.title}</th>
+                          <td className="px-4 py-3"><BasisTag basis={data.planOptions.find((item) => item.id === option.optionId)?.basis} /></td>
                           <td className="px-4 py-3 text-ivory/65">{titleCase(option.optionType)}</td>
                           <td className="px-4 py-3 text-right font-mono text-ivory/80">{option.capitalCost === null ? 'Missing' : money(option.capitalCost)}</td>
                           <td className="px-4 py-3 text-right font-mono text-ivory/80">{option.netAnnualBenefit === null ? 'Missing' : money(option.netAnnualBenefit)}</td>
@@ -454,6 +457,7 @@ export default function PlanReport() {
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge tone="outline">{titleCase(option.optionType)}</Badge>
+                            <BasisTag basis={record?.basis} />
                             {option.decision ? <StatusBadge status={option.decision.status} /> : <Badge tone="gold">No decision</Badge>}
                             {option.decision?.ownerName && <Badge tone="violet">Owner: {option.decision.ownerName}</Badge>}
                           </div>

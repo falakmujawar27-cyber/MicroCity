@@ -154,7 +154,7 @@ export default function Support() {
               <dt className="font-mono text-[0.625rem] uppercase tracking-widest text-gold">Colleges you belong to</dt>
               <dd className="mt-1 flex flex-wrap gap-2">
                 {session.memberships.map((membership) => (
-                  <Badge key={membership.collegeId} tone={membership.collegeId === workspace.activeCollege.id ? 'violet' : 'outline'}>
+                  <Badge key={membership.collegeId} tone={membership.collegeId === workspace.activeCollege.id ? 'violet' : 'outline'} wrap>
                     {membership.collegeName} · {ROLE_LABELS[membership.role]}
                   </Badge>
                 ))}

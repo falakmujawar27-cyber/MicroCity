@@ -51,6 +51,18 @@ export interface StoredUser {
   username: string
   displayName: string
   sample: boolean
+  platformAdmin: boolean
+  /** Temporary password returned once when a Platform admin creates the account. */
+  temporaryPassword?: string | null
+}
+
+export interface CollegeRow {
+  id: string
+  name: string
+  code: string | null
+  address: string | null
+  email: string | null
+  mode: 'demo' | 'pilot'
 }
 
 export interface StoredMembership {
@@ -91,8 +103,24 @@ export interface Database {
   getUser: (id: string) => StoredUser | null
   getMemberships: (userId: string) => StoredMembership[]
   membershipRole: (userId: string, collegeId: string) => string | null
-  listColleges: () => { id: string; name: string }[]
-  findCollegeByCode: (code: string) => { id: string; name: string } | null
+  listColleges: () => CollegeRow[]
+  findCollegeByCode: (code: string) => CollegeRow | null
+  getCollege: (id: string) => CollegeRow | null
+  createCollege: (input: {
+    id: string
+    name: string
+    code: string
+    address: string | null
+    email: string | null
+    mode: 'demo' | 'pilot'
+  }) => void
+  createPlatformAdmin: (input: {
+    id: string
+    username: string
+    displayName: string
+    password: string
+    sample: boolean
+  }) => void
   createSession: (userId: string, ttlMs: number) => string
   getSessionUser: (token: string) => StoredUser | null
   deleteSession: (token: string) => void
@@ -135,7 +163,11 @@ export interface Database {
   aiCallsToday: (dayUtc?: string) => { calls: number; rejected: number }
 }
 
-export function createDatabase(path = ':memory:', seed = true): Database {
+export function createDatabase(
+  path = ':memory:',
+  seed = true,
+  options: { demoMode?: boolean } = {},
+): Database {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
   const sql = new DatabaseSync(path)
   sql.exec('PRAGMA journal_mode = WAL;')
@@ -144,7 +176,10 @@ export function createDatabase(path = ':memory:', seed = true): Database {
     CREATE TABLE IF NOT EXISTS colleges (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      code TEXT
+      code TEXT,
+      address TEXT,
+      email TEXT,
+      mode TEXT NOT NULL DEFAULT 'demo'
     );
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -232,6 +267,19 @@ export function createDatabase(path = ':memory:', seed = true): Database {
   if (!collegeColumns.some((column) => column.name === 'code')) {
     sql.exec('ALTER TABLE colleges ADD COLUMN code TEXT')
   }
+  if (!collegeColumns.some((column) => column.name === 'address')) {
+    sql.exec('ALTER TABLE colleges ADD COLUMN address TEXT')
+  }
+  if (!collegeColumns.some((column) => column.name === 'email')) {
+    sql.exec('ALTER TABLE colleges ADD COLUMN email TEXT')
+  }
+  if (!collegeColumns.some((column) => column.name === 'mode')) {
+    sql.exec("ALTER TABLE colleges ADD COLUMN mode TEXT NOT NULL DEFAULT 'demo'")
+  }
+  const userColumns = sql.prepare('PRAGMA table_info(users)').all() as { name?: string }[]
+  if (!userColumns.some((column) => column.name === 'platform_admin')) {
+    sql.exec('ALTER TABLE users ADD COLUMN platform_admin INTEGER NOT NULL DEFAULT 0')
+  }
   const setCollegeCode = sql.prepare(
     "UPDATE colleges SET code = ? WHERE id = ? AND (code IS NULL OR code = '')",
   )
@@ -267,6 +315,7 @@ export function createDatabase(path = ':memory:', seed = true): Database {
         username: String(row.username),
         displayName: String(row.display_name),
         sample: Number(row.sample) === 1,
+        platformAdmin: Number(row.platform_admin) === 1,
         passwordHash: String(row.password_hash),
         salt: String(row.salt),
       }
@@ -280,6 +329,7 @@ export function createDatabase(path = ':memory:', seed = true): Database {
         username: String(row.username),
         displayName: String(row.display_name),
         sample: Number(row.sample) === 1,
+        platformAdmin: Number(row.platform_admin) === 1,
       }
     },
 
@@ -299,8 +349,8 @@ export function createDatabase(path = ':memory:', seed = true): Database {
     },
 
     listColleges() {
-      return (sql.prepare('SELECT id, name FROM colleges ORDER BY name').all() as Record<string, unknown>[]).map(
-        (row) => ({ id: String(row.id), name: String(row.name) }),
+      return (sql.prepare('SELECT * FROM colleges ORDER BY name').all() as Record<string, unknown>[]).map(
+        rowToCollege,
       )
     },
 
@@ -308,9 +358,37 @@ export function createDatabase(path = ':memory:', seed = true): Database {
       const trimmed = code.trim()
       if (!trimmed) return null
       const row = sql
-        .prepare('SELECT id, name FROM colleges WHERE code IS NOT NULL AND UPPER(code) = UPPER(?)')
+        .prepare('SELECT * FROM colleges WHERE code IS NOT NULL AND UPPER(code) = UPPER(?)')
         .get(trimmed) as Record<string, unknown> | undefined
-      return row ? { id: String(row.id), name: String(row.name) } : null
+      return row ? rowToCollege(row) : null
+    },
+
+    getCollege(id) {
+      const row = sql.prepare('SELECT * FROM colleges WHERE id = ?').get(id) as Record<string, unknown> | undefined
+      return row ? rowToCollege(row) : null
+    },
+
+    createCollege(input) {
+      sql
+        .prepare('INSERT INTO colleges (id, name, code, address, email, mode) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(input.id, input.name, input.code, input.address, input.email, input.mode)
+    },
+
+    createPlatformAdmin(input) {
+      const at = new Date().toISOString()
+      const salt = newSalt()
+      sql.prepare(
+        `INSERT INTO users (id, username, display_name, password_hash, salt, sample, platform_admin, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+      ).run(
+        input.id,
+        input.username,
+        input.displayName,
+        hashPassword(input.password, salt),
+        salt,
+        input.sample ? 1 : 0,
+        at,
+      )
     },
 
     createSession(userId, ttlMs) {
@@ -329,6 +407,7 @@ export function createDatabase(path = ':memory:', seed = true): Database {
         username: String(row.username),
         displayName: String(row.display_name),
         sample: Number(row.sample) === 1,
+        platformAdmin: Number(row.platform_admin) === 1,
       }
     },
 
@@ -372,7 +451,7 @@ export function createDatabase(path = ':memory:', seed = true): Database {
       return (
         sql
           .prepare(
-            `SELECT u.id, u.username, u.display_name, u.sample, m.role
+            `SELECT u.id, u.username, u.display_name, u.sample, u.platform_admin, m.role
              FROM memberships m JOIN users u ON u.id = m.user_id
              WHERE m.college_id = ? ORDER BY m.role, u.display_name`,
           )
@@ -382,6 +461,7 @@ export function createDatabase(path = ':memory:', seed = true): Database {
         username: String(row.username),
         displayName: String(row.display_name),
         sample: Number(row.sample) === 1,
+        platformAdmin: Number(row.platform_admin) === 1,
         role: String(row.role),
       }))
     },
@@ -572,8 +652,32 @@ export function createDatabase(path = ':memory:', seed = true): Database {
     applyPhaseCTickets(db)
     applyNearbyDemoSeed(db)
     applyUrbanIssueScoping(db)
+    const demoMode = options.demoMode ?? process.env.DEMO_MODE === 'true'
+    if (demoMode) seedDemoPlatformAdmin(db)
   }
   return db
+}
+
+/** Demo-only Platform admin. Never seeded when DEMO_MODE is not true. */
+export function seedDemoPlatformAdmin(db: Database): void {
+  if (db.getUserByUsername('platform-admin')) return
+  db.createPlatformAdmin({
+    id: 'usr-platform-admin',
+    username: 'platform-admin',
+    displayName: 'Platform Administrator (demo)',
+    password: 'platform-admin-demo-pass',
+    sample: true,
+  })
+  db.addAudit({
+    collegeId: null,
+    actorId: 'system',
+    actorName: 'System',
+    action: 'seed',
+    entity: 'platformAdmin',
+    entityId: 'usr-platform-admin',
+    detail: 'Seeded the demo Platform admin account because DEMO_MODE is true.',
+    metadata: null,
+  })
 }
 
 /**
@@ -606,6 +710,17 @@ export function applyUrbanIssueScoping(db: Database): void {
       detail: `Assigned an origin college to ${assigned} public issue record(s) so viewing is college-scoped.`,
       metadata: null,
     })
+  }
+}
+
+function rowToCollege(row: Record<string, unknown>): CollegeRow {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    code: row.code === null || row.code === undefined ? null : String(row.code),
+    address: row.address === null || row.address === undefined ? null : String(row.address),
+    email: row.email === null || row.email === undefined ? null : String(row.email),
+    mode: row.mode === 'pilot' ? 'pilot' : 'demo',
   }
 }
 

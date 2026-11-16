@@ -29,10 +29,30 @@ const roles = [
 ] as const
 
 const steps = [
-  { title: 'Sign in with your college code', detail: 'Your college gives you the code when you join.' },
-  { title: 'Press Report a problem', detail: 'It sits at the top of the Issues page.' },
-  { title: 'Pick what and where, add a photo', detail: 'Say what is wrong and choose the building or room.' },
-  { title: 'Watch the status', detail: 'Open or in progress, then resolved when the work is done.' },
+  {
+    title: 'Sign in with your college code',
+    detail: 'Your college gives you the code when you join.',
+    image: '/images/landing/student-1-sign-in.webp',
+    alt: 'MicroCity sign-in at phone width, with the college field set to Shree L.R. Tiwari College of Engineering and empty username and password fields.',
+  },
+  {
+    title: 'Press Report a problem',
+    detail: 'It sits at the top of the Issues page.',
+    image: '/images/landing/student-2-home.webp',
+    alt: 'Student home at phone width with a large Report a problem button and the student’s open reports below it.',
+  },
+  {
+    title: 'Pick what and where, add a photo',
+    detail: 'Say what is wrong and choose the building or room.',
+    image: '/images/landing/student-3-report-form.webp',
+    alt: 'Report a problem step one at phone width asking what is broken, with Electrical, Water, Furniture, IT and projector, Cleaning and Other choices.',
+  },
+  {
+    title: 'Watch the status',
+    detail: 'Open or in progress, then resolved when the work is done.',
+    image: '/images/landing/student-4-my-reports.webp',
+    alt: 'My reports at phone width showing each report’s progress line: Reported, Assigned, In progress and Fixed.',
+  },
 ] as const
 
 const navItems = [
@@ -77,7 +97,7 @@ export default function Home() {
             <h1 className="mt-5 max-w-2xl font-heading text-4xl font-semibold leading-[1.05] tracking-tight text-ivory sm:text-5xl lg:text-6xl">
               See what your campus needs. Fix what is broken.
             </h1>
-            <p className="mt-6 max-w-xl text-lg leading-relaxed text-ivory/70">
+            <p className="mt-7 max-w-xl text-lg leading-relaxed text-ivory/70">
               Report a problem, follow the repair, and plan the work your campus needs next — all in one place.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -96,26 +116,32 @@ export default function Home() {
             </div>
           </div>
 
-          <div
-            role="img"
-            aria-label="Placeholder for a MicroCity product screenshot or short recording"
-            className="border border-violet/50 bg-obsidian p-3 shadow-2xl shadow-black/40"
-          >
-            <div className="flex aspect-[4/3] flex-col items-center justify-center gap-4 border border-dashed border-ivory/25 bg-ink/60 px-6 text-center">
-              <span
-                aria-hidden="true"
-                className="inline-flex h-14 w-14 items-center justify-center rounded-full border border-gold/70 text-gold"
-              >
-                <svg viewBox="0 0 24 24" className="ml-1 h-6 w-6" fill="currentColor" aria-hidden="true">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </span>
-              <p className="font-mono text-xs uppercase tracking-[0.2em] text-gold">Screenshot placeholder</p>
-              <p className="max-w-xs text-sm leading-relaxed text-ivory/60">
-                A screenshot or short recording of the workspace will appear here.
-              </p>
+          <figure>
+            <div className="relative">
+              <div className="overflow-hidden border border-violet/50 bg-obsidian shadow-2xl shadow-black/40">
+                <img
+                  src="/images/hero-skyline.jpg"
+                  alt="An Indian city skyline with construction cranes and glass office buildings — an atmosphere photograph, not the pilot campus."
+                  width={2048}
+                  height={1536}
+                  className="block aspect-[4/3] w-full object-cover"
+                />
+              </div>
+              <div className="absolute -bottom-8 right-4 hidden w-[54%] border border-violet/50 bg-obsidian p-2 shadow-2xl shadow-black/60 sm:block lg:-right-8">
+                <img
+                  src="/images/landing/hero-estates-overview.webp"
+                  alt="MicroCity Estates Overview for Shree L.R. Tiwari College of Engineering, showing the Pilot: illustrative data badge, critical gap and open issue counts, and the priority list."
+                  width={1440}
+                  height={1080}
+                  className="block h-auto w-full"
+                />
+              </div>
             </div>
-          </div>
+            <figcaption className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[0.625rem] uppercase tracking-widest text-ivory/45 sm:mt-14">
+              <span>Atmosphere photograph · CC0 · Yusuf Mudagal</span>
+              <span className="text-gold/70">Product view · illustrative data</span>
+            </figcaption>
+          </figure>
         </section>
       </div>
 
@@ -186,13 +212,21 @@ export default function Home() {
                 <p className="font-mono text-xs tracking-[0.2em] text-gold">{String(index + 1).padStart(2, '0')}</p>
                 <h3 className="mt-3 text-lg font-semibold leading-snug">{step.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-ivory/70">{step.detail}</p>
+                <img
+                  src={step.image}
+                  alt={step.alt}
+                  width={360}
+                  height={740}
+                  loading="lazy"
+                  className="mt-4 block h-auto w-full border border-violet/30"
+                />
               </li>
             ))}
           </ol>
         </section>
 
         <footer className="border-t border-violet/20 px-5 py-8 text-center sm:px-8">
-          <p className="text-sm text-ivory/70">MicroCity uses demonstration data in this workspace.</p>
+          <p className="text-sm text-ivory/70">This workspace uses demonstration or illustrative data.</p>
         </footer>
       </div>
     </div>

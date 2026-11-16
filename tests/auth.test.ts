@@ -311,7 +311,7 @@ describe('demo accounts endpoint', () => {
     }
   })
 
-  it('lists one account per role when DEMO_MODE is true', async () => {
+  it('lists the demo accounts for every seeded college when DEMO_MODE is true', async () => {
     const app = await startApp({ DEMO_MODE: 'true' })
     try {
       const response = await fetch(`${app.url}/api/auth/demo`)
@@ -320,12 +320,16 @@ describe('demo accounts endpoint', () => {
         accounts: { role: string; username: string; password: string; collegeId: string }[]
       }
       assert.equal(payload.enabled, true)
+      const vidya = payload.accounts.filter((account) => account.collegeId === 'clg-bv')
       assert.deepEqual(
-        payload.accounts.map((account) => account.role).sort(),
+        vidya.map((account) => account.role).sort(),
         ['admin', 'estates', 'faculty', 'maintenance', 'student'],
       )
+      assert.ok(
+        payload.accounts.some((account) => account.collegeId === 'clg-fd' && account.role === 'admin'),
+        'the second demo college is offered too',
+      )
       for (const account of payload.accounts) {
-        assert.equal(account.collegeId, 'clg-bv')
         assert.equal(account.password, `${account.username}-pass`)
       }
     } finally {

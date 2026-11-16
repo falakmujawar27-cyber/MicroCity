@@ -35,6 +35,14 @@ function meterFigureTag(meter: MeterAnalysis): FigureTag {
   return meter.measurementType === 'estimated' ? 'Estimated' : 'Measured'
 }
 
+/** The row's own record tag, so imported and illustrative rows stay distinguishable. */
+function recordTag(basis: string | null | undefined): FigureTag {
+  if (basis === 'measured') return 'Measured'
+  if (basis === 'estimated') return 'Estimated'
+  if (basis === 'illustrative') return 'Illustrative'
+  return 'Missing'
+}
+
 export interface ReportInput {
   workspace: WorkspacePayload
   analysis: AnalysisBundle
@@ -174,12 +182,20 @@ export function buildReportMarkdown(input: ReportInputWithSummary): string {
   const publicOpen = data.urbanIssues.filter((row) => row.status === 'reported' || row.status === 'in_progress')
   const waiting = p.options.filter((option) => option.approvalState === 'none' || option.approvalState === 'proposed')
   const critical = analysis.gaps.filter(isCriticalGapItem)
+  const basisById = new Map<string, string | null | undefined>()
+  for (const record of [...data.rooms, ...data.buildings, ...data.assets, ...data.complaints, ...data.planOptions]) {
+    basisById.set(record.id, record.basis)
+  }
+  const rowTag = (ids: string[]): FigureTag => {
+    const tags = ids.map((id) => recordTag(basisById.get(id))).filter((tag) => tag !== 'Missing')
+    return tags.length > 0 ? weakestTag(tags) : 'Missing'
+  }
 
   lines.push(`# MicroCity infrastructure report — ${mdEscape(college)}`, '')
   lines.push(`**Generated:** ${formatDateTime(analysis.asOf)}  `)
   lines.push(`**Prepared by:** ${mdEscape(preparedBy)} (${roleLabel})  `)
   lines.push(`**College scope:** ${mdEscape(college)}  `)
-  lines.push(`**Data source:** ${mdEscape(provenance.name)} — ${provenance.synthetic ? 'SYNTHETIC base data' : 'recorded data'}, ${mdEscape(provenance.license)}`, '')
+  lines.push(`**Data source:** ${mdEscape(provenance.name)} — ${provenance.synthetic ? 'SYNTHETIC base data' : 'illustrative pilot data'}, ${mdEscape(provenance.license)}`, '')
   lines.push('> This report uses the records visible to the signed-in account. It is not an engineering survey, statutory inspection or financial forecast. Missing values remain missing and are not treated as zero.')
   if (provenance.notes) lines.push(`> ${mdEscape(provenance.notes)}`)
   lines.push('', '**Figure tags:** Measured — recorded values or counts of records; Estimated — calculated scores, ratios, estimates or tariff-based costs; Illustrative — plan inputs or project-assumption parameters, not predictions; Missing — unavailable, with nothing assumed. Tags do not turn synthetic records into real measurements. Dates, identifiers and section numbers are not measurement figures.', '')
@@ -221,21 +237,21 @@ export function buildReportMarkdown(input: ReportInputWithSummary): string {
   lines.push(`- Plan options: ${figure(p.options.length)}; ${figure(p.approvalCounts.approved)} approved, ${figure(p.approvalCounts.proposed)} proposed, ${figure(p.approvalCounts.none)} with no decision.`, '')
 
   lines.push('### Records behind the Overview counts', '')
-  lines.push('| Count | Value | Matching record IDs / computed finding IDs |')
-  lines.push('| --- | --- | --- |')
-  lines.push(`| Critical gaps | ${figure(critical.length)} | ${critical.map((row) => `${mdEscape(row.id)}${row.noPlanYet ? ' (no plan yet)' : ''}`).join(', ') || 'None'} |`)
-  lines.push(`| Open campus issues | ${figure(campusOpen.length)} | ${campusOpen.map((row) => mdEscape(row.id)).join(', ') || 'None'} |`)
-  lines.push(`| Open public issues | ${figure(publicOpen.length)} | ${publicOpen.map((row) => mdEscape(row.id)).join(', ') || 'None'} |`)
-  lines.push(`| Decisions waiting | ${figure(waiting.length)} | ${waiting.map((row) => `${mdEscape(row.optionId)} (${row.approvalState})`).join(', ') || 'None'} |`, '')
+  lines.push('| Count | Value | Basis | Matching record IDs / computed finding IDs |')
+  lines.push('| --- | --- | --- | --- |')
+  lines.push(`| Critical gaps | ${figure(critical.length)} | ${figureTag(rowTag(critical.flatMap((row) => row.subjectIds)))} | ${critical.map((row) => `${mdEscape(row.id)}${row.noPlanYet ? ' (no plan yet)' : ''}`).join(', ') || 'None'} |`)
+  lines.push(`| Open campus issues | ${figure(campusOpen.length)} | ${figureTag(rowTag(campusOpen.map((row) => row.id)))} | ${campusOpen.map((row) => mdEscape(row.id)).join(', ') || 'None'} |`)
+  lines.push(`| Open public issues | ${figure(publicOpen.length)} | ${figureTag(rowTag(publicOpen.map((row) => row.id)))} | ${publicOpen.map((row) => mdEscape(row.id)).join(', ') || 'None'} |`)
+  lines.push(`| Decisions waiting | ${figure(waiting.length)} | ${figureTag(rowTag(waiting.map((row) => row.optionId)))} | ${waiting.map((row) => `${mdEscape(row.optionId)} (${row.approvalState})`).join(', ') || 'None'} |`, '')
 
   lines.push('## 2. Room capacity and needs', '')
   if (c.rooms.length === 0) {
     lines.push('No rooms are recorded for this college. [Missing]')
   } else {
-    lines.push('| Room | Building | Capacity | Peak enrolled | Shortage slots | Utilisation | Needs score | Status |')
-    lines.push('| --- | --- | --- | --- | --- | --- | --- | --- |')
+    lines.push('| Room | Building | Capacity | Peak enrolled | Shortage slots | Utilisation | Needs score | Status | Basis |')
+    lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
     for (const room of c.rooms) {
-      lines.push(`| ${mdEscape(room.code)}${room.name ? ` — ${mdEscape(room.name)}` : ''} | ${mdEscape(room.buildingName)} | ${figure(room.capacity)} | ${figure(room.expectedPeak)} | ${figure(room.shortageSlots)} | ${figure(room.averageUtilisation === null ? null : room.averageUtilisation * 100, 'Estimated', '%')} | ${figure(room.score, 'Estimated')} | ${titleCase(room.status)} |`)
+      lines.push(`| ${mdEscape(room.code)}${room.name ? ` — ${mdEscape(room.name)}` : ''} | ${mdEscape(room.buildingName)} | ${figure(room.capacity)} | ${figure(room.expectedPeak)} | ${figure(room.shortageSlots)} | ${figure(room.averageUtilisation === null ? null : room.averageUtilisation * 100, 'Estimated', '%')} | ${figure(room.score, 'Estimated')} | ${titleCase(room.status)} | ${figureTag(rowTag([room.roomId]))} |`)
     }
     lines.push('', '### Recorded capacity shortfalls', '')
     lines.push('| Room | Activity | Starts | Enrolled | Capacity | Shortfall |')
@@ -285,16 +301,16 @@ export function buildReportMarkdown(input: ReportInputWithSummary): string {
   for (const row of analysis.nearby) {
     for (const asset of row.records) {
       const tag = titleCase(asset.basis) as FigureTag
-      lines.push(`| ${mdEscape(asset.id)} | ${row.label} | ${mdEscape(asset.locationDescription)} | ${figure(asset.distanceMetres, titleCase(asset.distanceBasis) as FigureTag, 'm')} | ${asset.condition ? titleCase(asset.condition) : 'Not recorded [Missing]'} | ${asset.dailyUsers === null ? 'Not entered [Missing]' : figure(asset.dailyUsers, tag)} | ${mdEscape(asset.usersMethod ?? 'Not entered')} | ${mdEscape(asset.responsibleAuthority)} | ${figureTag(tag)} |`)
+      lines.push(`| ${mdEscape(asset.id)} | ${row.label} | ${mdEscape(asset.locationDescription)} | ${figure(asset.distanceMetres, titleCase(asset.distanceBasis) as FigureTag, 'm')} | ${asset.condition ? titleCase(asset.condition) : 'Not recorded [Missing]'} | ${asset.dailyUsers === null ? 'Not entered [Missing]' : figure(asset.dailyUsers, tag)} | ${mdEscape(asset.usersMethod ?? 'Not entered')} | ${mdEscape(asset.responsibleAuthority ?? 'Not recorded')} | ${figureTag(tag)} |`)
     }
   }
   lines.push('')
   lines.push('## 3. Electricity and water', '')
-  lines.push('| Meter | Building | Utility | Reading type | Known consumption | Tag | Missing readings | Cost estimate | Quality |')
-  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+  lines.push('| Meter | Building | Utility | Reading type | Known consumption | Consumption tag | Missing readings | Cost estimate | Quality | Basis |')
+  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
   for (const meter of u.meters) {
     const consumption = figure(meter.knownPeriods === 0 ? null : meter.knownConsumption, meterFigureTag(meter), meter.meter.unit)
-    lines.push(`| ${mdEscape(meter.meter.label)} | ${mdEscape(meter.buildingName)} | ${titleCase(meter.meter.utility)} | ${titleCase(meter.meter.readingType)} | ${consumption}${meter.missingReadings > 0 ? ' (lower bound)' : ''} | ${meterFigureTag(meter)} | ${figure(meter.missingReadings)} | ${money(meter.estimatedCost, meter.costCurrency, 'Estimated')}${meter.estimatedCost !== null && !meter.costComplete ? ' (partial)' : ''} | ${titleCase(meter.quality)} |`)
+    lines.push(`| ${mdEscape(meter.meter.label)} | ${mdEscape(meter.buildingName)} | ${titleCase(meter.meter.utility)} | ${titleCase(meter.meter.readingType)} | ${consumption}${meter.missingReadings > 0 ? ' (lower bound)' : ''} | ${meterFigureTag(meter)} | ${figure(meter.missingReadings)} | ${money(meter.estimatedCost, meter.costCurrency, 'Estimated')}${meter.estimatedCost !== null && !meter.costComplete ? ' (partial)' : ''} | ${titleCase(meter.quality)} | ${figureTag(recordTag(meter.meter.basis))} |`)
   }
   lines.push('', '### Thresholds by category', '')
   const waterLimit = workspace.needsLimits.find((limit) => limit.category === 'water')
@@ -336,10 +352,10 @@ export function buildReportMarkdown(input: ReportInputWithSummary): string {
   lines.push('## 4. Maintenance and issues', '')
   if (m.ranked.length === 0) lines.push('No active complaints are visible to this account.')
   else {
-    lines.push('| Priority | Score | Category | Severity | Target | Age (days) | Status | Description |')
-    lines.push('| --- | --- | --- | --- | --- | --- | --- | --- |')
+    lines.push('| Priority | Score | Category | Severity | Target | Age (days) | Status | Description | Basis |')
+    lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
     for (const ranked of m.ranked) {
-      lines.push(`| ${ranked.bandLabel} | ${figure(ranked.score, 'Estimated')} | ${mdEscape(ranked.category)} | ${titleCase(ranked.severity)} | ${mdEscape(ranked.targetLabel)} | ${figure(ranked.ageDays, 'Estimated')} | ${titleCase(ranked.status)} | ${mdEscape(ranked.description.slice(0, 140))} |`)
+      lines.push(`| ${ranked.bandLabel} | ${figure(ranked.score, 'Estimated')} | ${mdEscape(ranked.category)} | ${titleCase(ranked.severity)} | ${mdEscape(ranked.targetLabel)} | ${figure(ranked.ageDays, 'Estimated')} | ${titleCase(ranked.status)} | ${mdEscape(ranked.description.slice(0, 140))} | ${figureTag(rowTag([ranked.complaintId]))} |`)
     }
   }
   if (m.repeats.length > 0 || m.publicRepeats.length > 0) {
@@ -369,6 +385,7 @@ export function buildReportMarkdown(input: ReportInputWithSummary): string {
   for (const option of p.options) {
     lines.push(`### ${mdEscape(option.title)}`, '')
     lines.push(`- Type: ${titleCase(option.optionType)}`)
+    lines.push(`- Basis: ${figureTag(rowTag([option.optionId]))}`)
     lines.push(`- Addresses finding: ${mdEscape(option.addressesFinding)}${option.finding ? ` (${option.finding.severity})` : ' (no matching finding in the current analysis)'}`)
     lines.push(`- Capital cost: ${money(option.capitalCost)}; annual cost: ${money(option.annualCost)}; annual savings: ${money(option.annualSavings)}`)
     lines.push(`- Net annual benefit: ${money(option.netAnnualBenefit)}; simple payback: ${figure(option.simplePaybackMonths, 'Illustrative', 'months')}`)

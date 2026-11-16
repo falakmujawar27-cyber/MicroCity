@@ -184,7 +184,7 @@ export function naturalKey(entity: string, data: Record<string, unknown>): strin
     case 'buildings': return s('name') ? `buildings:${s('name')}` : null
     case 'rooms': return s('buildingId') && s('code') ? `rooms:${s('buildingId')}:${s('code')}` : null
     case 'timetableSlots': return s('roomId') && s('startsAt') ? `timetable:${s('roomId')}:${s('startsAt')}:${s('endsAt')}` : null
-    case 'assets': return s('name') ? `assets:${s('name')}` : null
+    case 'assets': return s('name') ? `assets:${s('buildingId') ?? ''}:${s('roomId') ?? ''}:${s('name')}` : null
     case 'inspections': return s('assetId') && s('scheduledFor') ? `inspections:${s('assetId')}:${s('scheduledFor')}` : null
     case 'utilityMeters': return s('buildingId') && s('label') ? `meters:${s('buildingId')}:${s('label')}` : null
     case 'utilityReadings': return s('meterId') && s('readAt') ? `readings:${s('meterId')}:${s('readAt')}` : null

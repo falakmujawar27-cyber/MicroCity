@@ -3,6 +3,7 @@ import PageHeading from '../../components/dashboard/PageHeading'
 import Panel from '../../components/ui/Panel'
 import Tabs from '../../components/ui/Tabs'
 import { Badge } from '../../components/ui/Badge'
+import BasisTag from '../../components/ui/BasisTag'
 import Notice from '../../components/ui/Notice'
 import RecordDialog from '../../components/ui/RecordDialog'
 import type { FormField } from '../../components/ui/RecordDialog'
@@ -324,6 +325,7 @@ export default function Resources() {
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
+                    <BasisTag basis={meter.meter.basis} />
                     <Badge tone={meter.measurementType === 'estimated' ? 'neutral' : 'ok'}>
                       {meter.measurementType === 'estimated' ? 'Estimated' : 'Measured'}
                     </Badge>
@@ -497,7 +499,7 @@ export default function Resources() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] border-collapse">
                   <thead><tr className="border-b border-violet/30">
-                    <th className={thClass}>Meter</th><th className={thClass}>Building</th><th className={thClass}>Utility</th><th className={thClass}>Unit</th><th className={thClass}>Reading type</th><th className={thClass}>Measurement</th><th className={thClass}>Actions</th>
+                    <th className={thClass}>Meter</th><th className={thClass}>Building</th><th className={thClass}>Utility</th><th className={thClass}>Unit</th><th className={thClass}>Reading type</th><th className={thClass}>Measurement</th><th className={thClass}>Basis</th><th className={thClass}>Actions</th>
                   </tr></thead>
                   <tbody>
                     {dataset.utilityMeters.map((meter) => (
@@ -508,6 +510,7 @@ export default function Resources() {
                         <td className={tdClass}>{meter.unit}</td>
                         <td className={tdClass}>{titleCase(meter.readingType)}</td>
                         <td className={tdClass}>{meter.measurementType === 'estimated' ? 'Estimated' : 'Measured'}</td>
+                        <td className={tdClass}><BasisTag basis={meter.basis} /></td>
                         <td className={tdClass}>
                           {canManage && (
                             <div className="flex gap-2">
@@ -531,7 +534,7 @@ export default function Resources() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[860px] border-collapse">
                   <thead><tr className="border-b border-violet/30">
-                    <th className={thClass}>Meter</th><th className={thClass}>Read at</th><th className={thClass}>Value</th><th className={thClass}>Unit</th><th className={thClass}>Note</th><th className={thClass}>Actions</th>
+                    <th className={thClass}>Meter</th><th className={thClass}>Read at</th><th className={thClass}>Value</th><th className={thClass}>Unit</th><th className={thClass}>Note</th><th className={thClass}>Basis</th><th className={thClass}>Actions</th>
                   </tr></thead>
                   <tbody>
                     {[...dataset.utilityReadings].sort((a, b) => b.readAt.localeCompare(a.readAt)).map((reading) => (
@@ -549,6 +552,7 @@ export default function Resources() {
                         </td>
                         <td className={tdClass}>{reading.unit}</td>
                         <td className={`${tdClass} max-w-xs`}>{reading.note ?? '—'}</td>
+                        <td className={tdClass}><BasisTag basis={reading.basis} /></td>
                         <td className={tdClass}>
                           {canManage && (
                             <div className="flex gap-2">

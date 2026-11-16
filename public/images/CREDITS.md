@@ -26,3 +26,18 @@ rate-limiting); StockSnap CDN was rejected (403 on all fetches).
 
 No other image files are bundled. All diagrams in the app are drawn
 in-house as inline SVG React components.
+
+## Landing screenshots (own screenshots of MicroCity, illustrative data)
+
+Captured on 2026-11-15 with headless Google Chrome (CDP) against the local
+production build, signed in to the pilot workspace for Shree L.R. Tiwari
+College of Engineering. Every campus record visible is Illustrative
+placeholder data; no password, key or real personal name is shown.
+
+| File | Bytes | Dimensions | Content |
+|---|---|---|---|
+| `landing/hero-estates-overview.webp` | 89,280 | 1440×1080 | Estates Overview, "Pilot: illustrative data" badge visible |
+| `landing/student-1-sign-in.webp` | 17,000 | 360×740 | Student sign-in with the college field |
+| `landing/student-2-home.webp` | 30,010 | 360×740 | Student home with Report a problem |
+| `landing/student-3-report-form.webp` | 21,170 | 360×740 | Report a problem, step 1 of 3 |
+| `landing/student-4-my-reports.webp` | 34,786 | 360×740 | My reports with the progress line |

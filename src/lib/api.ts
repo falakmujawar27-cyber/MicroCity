@@ -178,6 +178,28 @@ export const api = {
     return request<{ colleges: { id: string; name: string }[] }>('/colleges')
   },
 
+  platformColleges() {
+    return request<{
+      colleges: {
+        id: string
+        name: string
+        code: string | null
+        address: string | null
+        email: string | null
+        mode: 'demo' | 'pilot'
+        members: number
+      }[]
+    }>('/platform/colleges')
+  },
+
+  createCollege(input: { name: string; address: string; email: string }) {
+    return request<{
+      college: { id: string; name: string; code: string; address: string; email: string; mode: 'pilot' }
+      admin: { username: string; temporaryPassword: string }
+      notice: string
+    }>('/platform/colleges', { method: 'POST', body: input })
+  },
+
   workspace(collegeId: string) {
     return request<WorkspacePayload>('/workspace', { collegeId })
   },

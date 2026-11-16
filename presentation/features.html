@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MicroCity features</title>
+<style>
+  :root{
+    --ink:#15131F; --violet:#4235A8; --bright:#5245F8; --tint:#EFECFC;
+    --gold:#8A5A16; --goldsoft:#FBF0D6; --line:#D8D3E6; --gray:#595465; --paper:#FCFBF8;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;width:1600px;height:1000px;overflow:hidden;background:var(--paper);
+    font-family:"Segoe UI","Aptos",system-ui,sans-serif;color:var(--ink)}
+  .page{width:1600px;height:1000px;padding:50px 56px 30px;position:relative;display:flex;flex-direction:column}
+  .top{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:3px solid var(--ink);padding-bottom:16px}
+  .kicker{font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--violet);font-weight:700}
+  h1{margin:7px 0 0;font-size:31px;line-height:1.12;letter-spacing:-.02em;font-weight:700}
+  .top .note{width:390px;font-size:13.5px;line-height:1.5;color:var(--gray);text-align:right}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:20px;margin-top:20px;flex:1;margin-bottom:58px}
+  .card{border:1.5px solid var(--ink);background:#fff;padding:17px 18px 15px;display:flex;flex-direction:column;position:relative}
+  .card .head{display:flex;align-items:center;gap:11px}
+  .mono{width:38px;height:38px;background:var(--violet);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;letter-spacing:.06em;flex:none}
+  .card h2{margin:0;font-size:18px;letter-spacing:-.015em;line-height:1.15}
+  .card .role-top{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--gray);margin-top:2px}
+  .card p{margin:11px 0 0;font-size:12.8px;line-height:1.45;color:#3D3947}
+  .chips{margin-top:auto;display:flex;flex-wrap:wrap;gap:5px;padding-top:9px;border-top:1px solid var(--line)}
+  .chip{font-size:10px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;padding:3px 7px;border:1px solid var(--line);color:var(--gray);background:#FAF9FC}
+  .chip.v{color:var(--violet);border-color:#C9C2EE;background:var(--tint)}
+  .gold .mono{background:var(--gold)}
+  .gold .chip.v{color:var(--gold);border-color:#E3C98F;background:var(--goldsoft)}
+  .ink .mono{background:var(--ink)}
+  .foot{position:absolute;left:56px;right:56px;bottom:26px;display:flex;justify-content:space-between;font-size:11.5px;color:var(--gray)}
+  .foot b{color:var(--ink)}
+  .brand{position:absolute;right:56px;top:50px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray)}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <div>
+      <div class="kicker">Features of the proposed solution</div>
+      <h1>Nine surfaces, one role-aware workspace</h1>
+    </div>
+    <div class="note">The navigation shows only what a role can use, and the server re-checks every action. No page hides data by styling alone.</div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="head"><div class="mono">OV</div><div><h2>Overview</h2><div class="role-top">The planning loop</div></div></div>
+      <p>&ldquo;Fix these first&rdquo; priority list built from critical capacity gaps, open issues and overdue inspections. Every figure carries its basis tag and points to the record behind it.</p>
+      <div class="chips"><span class="chip v">Admin</span><span class="chip v">Estates</span></div>
+    </div>
+
+    <div class="card ink">
+      <div class="head"><div class="mono">IN</div><div><h2>Inventory</h2><div class="role-top">The record register</div></div></div>
+      <p>Buildings, rooms and capacities, condition ratings, assets and their service dates, meters and inspection dates: one auditable register per college.</p>
+      <div class="chips"><span class="chip v">Admin</span><span class="chip v">Estates</span></div>
+    </div>
+
+    <div class="card">
+      <div class="head"><div class="mono">NG</div><div><h2>Needs and Gaps</h2><div class="role-top">Demand vs capacity</div></div></div>
+      <p>Five need categories compared against recorded capacity. Each gap shows the shortfall, a rule-based explanation, recorded options with their trade-offs, and the decision taken.</p>
+      <div class="chips"><span class="chip v">Admin</span><span class="chip v">Estates</span></div>
+    </div>
+
+    <div class="card">
+      <div class="head"><div class="mono">RS</div><div><h2>Resources</h2><div class="role-top">Electricity and water</div></div></div>
+      <p>Electricity and water meters with measured or estimated readings. A missing reading stays a visible gap, and until a tariff is entered the cost stays unavailable rather than guessed.</p>
+      <div class="chips"><span class="chip v">Admin</span><span class="chip v">Estates</span></div>
+    </div>
+
+    <div class="card">
+      <div class="head"><div class="mono">IM</div><div><h2>Issues and Maintenance</h2><div class="role-top">Report to resolution</div></div></div>
+      <p>Complaints and nearby public issues, assignment to a technician, maintenance priority, inspections and a full activity trail. Reporters follow the ticket they filed.</p>
+      <div class="chips"><span class="chip v">All staff</span><span class="chip v">Report: all roles</span></div>
+    </div>
+
+    <div class="card">
+      <div class="head"><div class="mono">PR</div><div><h2>Plan and Report</h2><div class="role-top">Decide and export</div></div></div>
+      <p>Recorded options, a proposed decision, and approve / reject / defer kept to the administrator. CSV, Markdown and print exports keep every basis tag intact.</p>
+      <div class="chips"><span class="chip v">Admin approves</span><span class="chip v">Estates views</span></div>
+    </div>
+
+    <div class="card gold">
+      <div class="head"><div class="mono">DC</div><div><h2>Data Centre</h2><div class="role-top">Bring your own records</div></div></div>
+      <p>CSV and Excel import with per-sheet column mapping, a preview before apply, append or replace safeguards, rejected-row reporting, import history and audit.</p>
+      <div class="chips"><span class="chip v">Admin only</span></div>
+    </div>
+
+    <div class="card gold">
+      <div class="head"><div class="mono">AD</div><div><h2>Administration</h2><div class="role-top">People and policy</div></div></div>
+      <p>Staff accounts, password resets, role changes, AI connection status, thresholds and priority weights, all checked against the capability matrix the API enforces.</p>
+      <div class="chips"><span class="chip v">Admin only</span></div>
+    </div>
+
+    <div class="card ink">
+      <div class="head"><div class="mono">PS</div><div><h2>Personal and Platform</h2><div class="role-top">Everyday use and onboarding</div></div></div>
+      <p>Report, My reports and Attendance for students, faculty and technicians. The platform admin creates a college and its first administrator, and never reads college records.</p>
+      <div class="chips"><span class="chip v">Student</span><span class="chip v">Faculty</span><span class="chip v">Maintenance</span><span class="chip">Platform</span></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div><b>Five primary items at most.</b> Planning, data and help links move to the top bar; nothing is buried.</div>
+    <div>MicroCity &middot; features &middot; 2026</div>
+  </div>
+</div>
+</body>
+</html>

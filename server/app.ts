@@ -6,7 +6,7 @@
  * account does not belong to, and all record writes pass through the
  * server-authoritative validators in record-validation.ts.
  */
-import { randomUUID, createHash } from 'node:crypto'
+import { randomUUID, randomBytes, createHash } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { CAMPUS_ENTITIES, ENTITY_BY_NAME, IMPORT_ORDER } from '../src/domain/entities.ts'
 import { ALL_ROLES, capabilityMatrix, hasCapability } from '../src/domain/permissions.ts'
@@ -55,6 +55,7 @@ import {
 import type { Database, StoredRecord, StoredUser } from './db.ts'
 import { hashPassword, verifyPassword } from './passwords.ts'
 import { SAMPLE_ACCOUNTS } from './seed.ts'
+import { TIWARI_ACCOUNTS, TIWARI_COLLEGE_NAME, ensureTiwariWorkspace } from './tiwari.ts'
 import {
   buildInspectionCards,
   buildJobCards,
@@ -103,6 +104,10 @@ interface ActiveCollege {
   collegeId: string
   collegeName: string
   role: UserRole
+  mode: 'demo' | 'pilot'
+  code: string | null
+  address: string | null
+  email: string | null
 }
 
 interface LoginAttempt {
@@ -140,6 +145,8 @@ export function createMicrocityApp(options: {
 }): MicrocityApp {
   const db = options.db
   const env = options.env ?? process.env
+  // Idempotent: completes any Tiwari bootstrap step that was waiting for data.
+  ensureTiwariWorkspace(db)
   const secureCookie = env.COOKIE_SECURE === 'true'
   const aiSettings = loadAiSettings(env)
   const loginAttempts = new Map<string, LoginAttempt>()
@@ -243,7 +250,24 @@ export function createMicrocityApp(options: {
     if (!role) {
       throw new HttpError(403, 'Your membership has an unrecognised role. Ask an administrator to correct it.')
     }
-    return { collegeId: membership.collegeId, collegeName: membership.collegeName, role }
+    const college = db.getCollege(membership.collegeId)
+    return {
+      collegeId: membership.collegeId,
+      collegeName: membership.collegeName,
+      role,
+      mode: college?.mode ?? 'demo',
+      code: college?.code ?? null,
+      address: college?.address ?? null,
+      email: college?.email ?? null,
+    }
+  }
+
+  function requirePlatformAdmin(req: IncomingMessage): SessionRecord {
+    const session = requireSession(req)
+    if (!session.user.platformAdmin) {
+      throw new HttpError(403, 'Only a Platform admin can manage colleges.', { code: 'platform-admin-required' })
+    }
+    return session
   }
 
   function actorFrom(session: SessionRecord, active: ActiveCollege): Actor {
@@ -463,13 +487,34 @@ export function createMicrocityApp(options: {
       : []
 
     return {
-      activeCollege: { id: active.collegeId, name: active.collegeName, role },
+      activeCollege: {
+        id: active.collegeId,
+        name: active.collegeName,
+        role,
+        mode: active.mode,
+        code: active.code,
+        address: active.address,
+        email: active.email,
+      },
       memberships: session.memberships.map((membership) => ({
         collegeId: membership.collegeId,
         collegeName: membership.collegeName,
         role: membership.role as UserRole,
       })),
-      provenance: readProvenance(db),
+      provenance:
+        active.mode === 'pilot'
+          ? {
+              name: 'tiwari-illustrative-2026-11',
+              synthetic: false,
+              generatedAt: '2026-11-15T00:00:00Z',
+              generator:
+                'Imported from Tiwari_College_illustrative_data_v2.xlsx plus seeded illustrative workspace records; no AI',
+              source: 'Pilot workbook supplied for the college',
+              license: 'Illustrative pilot data - not a survey of the real college',
+              notes:
+                'Every campus record is illustrative. The college name and address are real location details. The two bus stops are public-source records (Estimated) and their condition, daily users and authority are not recorded. Tariffs and option costs are deliberately blank.',
+            }
+          : readProvenance(db),
       dataset: sources,
       imports,
       audit,
@@ -1716,6 +1761,9 @@ export function createMicrocityApp(options: {
       }
       database.sql.exec('COMMIT')
       committed = true
+      // The Tiwari bootstrap waits for the imported buildings before it can
+      // create meters and the illustrative world; this is idempotent.
+      ensureTiwariWorkspace(database)
     } catch (error) {
       if (!committed) {
         try {
@@ -1781,7 +1829,7 @@ export function createMicrocityApp(options: {
     const chosenCollegeId = typeof body.collegeId === 'string' ? body.collegeId.trim() : ''
     const chosenRoleRaw = typeof body.role === 'string' ? body.role.trim() : ''
     if (!username || !password) throw new HttpError(400, 'Enter your username and password.')
-    if (chosenRoleRaw && !asRole(chosenRoleRaw)) {
+    if (chosenRoleRaw && chosenRoleRaw !== 'platform_admin' && !asRole(chosenRoleRaw)) {
       throw new HttpError(422, 'Choose a valid role.')
     }
     const chosenRole = asRole(chosenRoleRaw)
@@ -1796,22 +1844,30 @@ export function createMicrocityApp(options: {
     }
 
     const memberships = db.getMemberships(user.id)
-    if (memberships.length === 0) {
+    if (memberships.length === 0 && !user.platformAdmin) {
       throw new HttpError(403, 'This account has no college membership. Ask an administrator to add you.')
     }
-    const membership = chosenCollegeId
-      ? memberships.find((item) => item.collegeId === chosenCollegeId)
-      : memberships[0]
-    if (!membership) {
-      throw new HttpError(403, 'This account is not a member of that college.', {
-        code: 'college-forbidden',
-      })
-    }
-    const realRole = asRole(membership.role)
-    if (chosenRole && chosenRole !== realRole) {
-      throw new HttpError(403, `This account is not a ${chosenRole} account.`, {
-        code: 'role-mismatch',
-      })
+    if (user.platformAdmin) {
+      if (chosenCollegeId || (chosenRole && chosenRole !== 'platform_admin')) {
+        throw new HttpError(403, 'A Platform admin account does not belong to a college.', {
+          code: 'platform-admin-no-college',
+        })
+      }
+    } else {
+      const membership = chosenCollegeId
+        ? memberships.find((item) => item.collegeId === chosenCollegeId)
+        : memberships[0]
+      if (!membership) {
+        throw new HttpError(403, 'This account is not a member of that college.', {
+          code: 'college-forbidden',
+        })
+      }
+      const realRole = asRole(membership.role)
+      if (chosenRole && chosenRole !== realRole) {
+        throw new HttpError(403, `This account is not a ${chosenRole} account.`, {
+          code: 'role-mismatch',
+        })
+      }
     }
 
     loginAttempts.delete(key)
@@ -1819,7 +1875,13 @@ export function createMicrocityApp(options: {
     setSessionCookie(res, token)
     const session: SessionRecord = {
       token,
-      user: { id: user.id, username: user.username, displayName: user.displayName, sample: user.sample },
+      user: {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        sample: user.sample,
+        platformAdmin: user.platformAdmin,
+      },
       memberships,
     }
     sendJson(res, 200, { session: toSessionInfo(session) })
@@ -1831,18 +1893,125 @@ export function createMicrocityApp(options: {
       sendJson(res, 200, { enabled: false, accounts: [] })
       return
     }
-    const collegeNames = new Map(db.listColleges().map((college) => [college.id, college.name]))
-    const accounts = (['admin', 'estates', 'maintenance', 'faculty', 'student'] as const)
-      .map((role) => SAMPLE_ACCOUNTS.find((account) => account.role === role && account.collegeId === 'clg-bv'))
-      .filter((account): account is (typeof SAMPLE_ACCOUNTS)[number] => Boolean(account))
-      .map((account) => ({
-        role: account.role,
-        username: account.username,
-        password: account.password,
-        collegeId: account.collegeId,
-        collegeName: collegeNames.get(account.collegeId) ?? account.collegeId,
-      }))
+    const colleges = new Map(db.listColleges().map((college) => [college.id, college]))
+    const tiwariCollege = [...colleges.values()].find((college) => college.name === TIWARI_COLLEGE_NAME)
+    const tiwariAvailable = tiwariCollege
+      ? TIWARI_ACCOUNTS.filter((account) => db.getUserByUsername(account.username)).map((account) => ({
+          ...account,
+          collegeId: tiwariCollege.id,
+        }))
+      : []
+    const available = [
+      ...SAMPLE_ACCOUNTS.filter((account) => colleges.has(account.collegeId) && db.getUserByUsername(account.username)),
+      ...tiwariAvailable,
+    ]
+    const accounts: {
+      role: UserRole
+      username: string
+      password: string
+      collegeId: string
+      collegeName: string
+    }[] = available.map((account) => ({
+      role: account.role as UserRole,
+      username: account.username,
+      password: account.password,
+      collegeId: account.collegeId,
+      collegeName: colleges.get(account.collegeId)?.name ?? account.collegeId,
+    }))
+    const platform = db.getUserByUsername('platform-admin')
+    if (platform) {
+      accounts.push({
+        role: 'platform_admin' as UserRole,
+        username: platform.username,
+        password: 'platform-admin-demo-pass',
+        collegeId: '',
+        collegeName: 'Platform (no college)',
+      })
+    }
     sendJson(res, 200, { enabled: true, accounts })
+  }
+
+  function handlePlatformColleges(req: IncomingMessage, res: ServerResponse): void {
+    requirePlatformAdmin(req)
+    const colleges = db.listColleges().map((college) => ({
+      id: college.id,
+      name: college.name,
+      code: college.code,
+      address: college.address,
+      email: college.email,
+      mode: college.mode,
+      members: db.listCollegeMembers(college.id).length,
+    }))
+    sendJson(res, 200, { colleges })
+  }
+
+  function collegeCodeFor(name: string): string {
+    const letters = name.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6) || 'COLLEGE'
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const suffix = String(1000 + (randomBytes(2).readUInt16BE(0) % 9000))
+      const code = `${letters}-${suffix}`
+      if (!db.findCollegeByCode(code)) return code
+    }
+    throw new HttpError(500, 'Could not generate a unique college code. Try again.')
+  }
+
+  async function handlePlatformCollegeCreate(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const session = requirePlatformAdmin(req)
+    const body = await readJson(req)
+    const name = requiredText(body.name, 'College name', 160)
+    const address = requiredText(body.address, 'Address', 240)
+    const email = requiredText(body.email, 'Official email', 160)
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new HttpError(422, 'Enter a valid official email address.', {
+        fieldErrors: { 'Official email': 'Enter a valid official email address.' },
+      })
+    }
+    const code = collegeCodeFor(name)
+    const collegeId = `clg-${randomUUID()}`
+    const adminId = `usr-${randomUUID()}`
+    const username = `admin-${randomBytes(3).toString('hex')}`
+    const temporaryPassword = randomBytes(9).toString('base64url')
+
+    db.sql.exec('BEGIN IMMEDIATE')
+    try {
+      db.createCollege({ id: collegeId, name, code, address, email, mode: 'pilot' })
+      db.createAccount({
+        id: adminId,
+        username,
+        displayName: `${name} Administrator`,
+        password: temporaryPassword,
+        collegeId,
+        role: 'admin',
+        sample: false,
+      })
+      db.sql.exec('COMMIT')
+    } catch (error) {
+      try {
+        db.sql.exec('ROLLBACK')
+      } catch {
+        /* the transaction is already closed */
+      }
+      throw error
+    }
+
+    db.addAudit({
+      collegeId: null,
+      actorId: session.user.id,
+      actorName: session.user.displayName,
+      action: 'create-college',
+      entity: 'colleges',
+      entityId: collegeId,
+      detail: `Created the college "${name}" (${code}) and its first administrator.`,
+      metadata: null,
+    })
+    ensureTiwariWorkspace(db)
+
+    sendJson(res, 201, {
+      college: { id: collegeId, name, code, address, email, mode: 'pilot' },
+      admin: { username, temporaryPassword },
+      notice:
+        'Show this temporary password once. The administrator can share the college code with students and faculty, and create Estates and Maintenance accounts.',
+    })
   }
 
   async function handleRegister(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -1893,7 +2062,7 @@ export function createMicrocityApp(options: {
     }
     const active = requireActive(req, new URL(req.url ?? '/', 'http://localhost'), {
       token: '',
-      user: { id, username, displayName, sample: false },
+      user: { id, username, displayName, sample: false, platformAdmin: false },
       memberships: db.getMemberships(id),
     }, college.id)
     writeAudit(
@@ -1909,7 +2078,7 @@ export function createMicrocityApp(options: {
     sendJson(res, 201, {
       session: toSessionInfo({
         token,
-        user: { id, username, displayName, sample: false },
+        user: { id, username, displayName, sample: false, platformAdmin: false },
         memberships: db.getMemberships(id),
       }),
     })
@@ -2231,6 +2400,8 @@ export function createMicrocityApp(options: {
       maintenance: ['explain-finding', 'categorise-issue'],
       faculty: ['categorise-issue'],
       student: ['categorise-issue'],
+      // A platform operator has no campus workspace; no AI task is available.
+      platform_admin: [],
     }
     if (!allowedTasks[active.role].includes(task)) {
       throw new HttpError(403, 'Your role cannot use this AI task.')
@@ -2548,7 +2719,18 @@ export function createMicrocityApp(options: {
     }
 
     if (method === 'GET' && pathname === '/api/colleges') {
-      sendJson(res, 200, { colleges: db.listColleges() })
+      // Public sign-in only needs names; codes, addresses and emails stay private.
+      sendJson(res, 200, {
+        colleges: db.listColleges().map((college) => ({ id: college.id, name: college.name })),
+      })
+      return
+    }
+    if (method === 'GET' && pathname === '/api/platform/colleges') {
+      handlePlatformColleges(req, res)
+      return
+    }
+    if (method === 'POST' && pathname === '/api/platform/colleges') {
+      await handlePlatformCollegeCreate(req, res)
       return
     }
     if (method === 'GET' && pathname === '/api/auth/demo') {
@@ -2767,6 +2949,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
 function toSessionInfo(session: SessionRecord): SessionInfo {
   return {
     user: session.user,
+    platformAdmin: session.user.platformAdmin,
     memberships: session.memberships.map((membership) => ({
       collegeId: membership.collegeId,
       collegeName: membership.collegeName,
@@ -2953,6 +3136,40 @@ function prepareImportedRows(
         if (resolution.warning) row.warnings.push(resolution.warning)
         if (resolution.id !== String(rawValue).trim()) row.raw[reference.field] = resolution.id
       }
+      if (entity === 'assets') {
+        const roomRef = optionalRaw(row.raw.roomId)
+        if (roomRef) {
+          const room = database.getRecord(roomRef)
+          const building = database.getRecord(roomRef)
+          const stagedRoom = (prepared.get('rooms') ?? []).find(
+            (candidate) => String(candidate.raw.id ?? '') === roomRef,
+          )
+          const stagedBuilding = (prepared.get('buildings') ?? []).find(
+            (candidate) => String(candidate.raw.id ?? '') === roomRef,
+          )
+          if (stagedRoom) {
+            row.raw.buildingId = optionalRaw(stagedRoom.raw.buildingId)
+          } else if (room?.entity === 'rooms' && room.collegeId === active.collegeId) {
+            row.raw.buildingId = room.data.buildingId
+          } else if (stagedBuilding) {
+            row.raw.buildingId = roomRef
+            row.raw.roomId = null
+            row.warnings.push(
+              `Room reference "${roomRef}" is a building, not a room; the asset was placed at building level.`,
+            )
+          } else if (building?.entity === 'buildings' && building.collegeId === active.collegeId) {
+            row.raw.buildingId = roomRef
+            row.raw.roomId = null
+            row.warnings.push(
+              `Room reference "${roomRef}" is a building, not a room; the asset was placed at building level.`,
+            )
+          } else {
+            row.warnings.push(
+              `Room reference "${roomRef}" did not match a room or building in this college; it is kept as text.`,
+            )
+          }
+        }
+      }
       if (entity === 'utilityReadings' && !optionalRaw(row.raw.unit)) {
         const meterId = optionalRaw(row.raw.meterId)
         if (meterId) {
@@ -3067,6 +3284,13 @@ function dataWarnings(entity: string, data: Record<string, unknown>): string[] {
   }
   if (entity === 'assets' && data.condition === null) {
     warnings.push('Condition is not recorded; condition-based maintenance scoring will be unavailable.')
+  }
+  if (entity === 'nearbyAssets') {
+    if (data.responsibleAuthority === null) {
+      warnings.push('Responsible authority is not entered; it stays blank rather than guessed.')
+    }
+    if (data.condition === null) warnings.push('Condition is not recorded for this nearby asset.')
+    if (data.dailyUsers === null) warnings.push('Daily users are not entered for this nearby asset.')
   }
   return warnings
 }

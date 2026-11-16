@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MicroCity architecture</title>
+<style>
+  :root{
+    --ink:#15131F; --violet:#4235A8; --bright:#5245F8; --tint:#EFECFC;
+    --gold:#8A5A16; --line:#D8D3E6; --gray:#595465; --paper:#FCFBF8;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;width:1600px;height:1000px;overflow:hidden;background:var(--paper);
+    font-family:"Segoe UI","Aptos",system-ui,sans-serif;color:var(--ink)}
+  .page{width:1600px;height:1000px;padding:50px 56px 34px;position:relative}
+  .top{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:3px solid var(--ink);padding-bottom:16px}
+  .kicker{font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--violet);font-weight:700}
+  h1{margin:7px 0 0;font-size:31px;line-height:1.12;letter-spacing:-.02em;font-weight:700}
+  .top .note{width:360px;font-size:13.5px;line-height:1.5;color:var(--gray);text-align:right}
+  .main{display:grid;grid-template-columns:250px 66px 320px 66px 375px 66px 345px;align-items:start;margin-top:18px;height:620px}
+  .col{height:100%}
+  .label{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--violet);font-weight:700;margin:0 0 10px;height:18px}
+  .panel{border:1.5px solid var(--ink);background:#fff;height:100%;padding:14px;display:flex;flex-direction:column;gap:9px;position:relative}
+  .panel h3{margin:0 0 2px;font-size:17px;letter-spacing:-.01em}
+  .panel .sub{font-size:11.5px;color:var(--gray);margin:-2px 0 4px}
+  .item{border:1px solid var(--line);background:#fff;padding:8px 10px;min-height:50px;display:flex;flex-direction:column;justify-content:center}
+  .item b{font-size:14px;font-weight:650;display:block}
+  .item span{font-size:11.5px;color:var(--gray);display:block;margin-top:2px;line-height:1.35}
+  .role{border:1.5px solid var(--ink);background:#fff;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;height:45px}
+  .role b{font-size:14.5px}
+  .role em{font-style:normal;font-size:11px;color:var(--gray)}
+  .platform{border:1.5px dashed var(--violet);background:var(--tint);margin-top:2px}
+  .server .item{border-left:4px solid var(--bright)}
+  .db .item{border-left:4px solid var(--gold)}
+  .browser .item{border-left:4px solid var(--violet)}
+  .arrow{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--violet)}
+  .arrow span{width:64px;font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--violet);font-weight:700;text-align:center;line-height:1.35}
+  .arrow svg{display:block}
+  .scope{margin-top:auto;border-top:1px dashed var(--line);padding-top:8px;font-size:11.5px;line-height:1.35;color:var(--gold);font-weight:600}
+  .ai{position:absolute;left:56px;right:56px;top:812px;border:1.5px dashed var(--violet);background:var(--tint);padding:13px 18px;display:flex;gap:20px;align-items:center;height:76px}
+  .ai .tag{font-size:11px;letter-spacing:.18em;font-weight:800;color:var(--violet);white-space:nowrap}
+  .ai p{margin:0;font-size:13px;line-height:1.45;color:var(--ink)}
+  .ai .src{margin-left:auto;font-size:11px;color:var(--gray);white-space:nowrap;font-family:Consolas,monospace}
+  .foot{position:absolute;left:56px;right:56px;bottom:28px;display:flex;justify-content:space-between;font-size:11.5px;color:var(--gray)}
+  .foot b{color:var(--ink)}
+  .brand{position:absolute;right:56px;top:50px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray)}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <div>
+      <div class="kicker">Proposed architecture</div>
+      <h1>Role-aware planning workspace, deterministic analysis, one local database</h1>
+    </div>
+    <div class="note">Five college roles, one shared public layer and a platform operator that provisions colleges without reading their records.</div>
+  </div>
+
+  <div class="main">
+    <div class="col">
+      <p class="label">01 &nbsp;Users</p>
+      <div class="role"><b>Student</b><em>report &amp; track</em></div>
+      <div class="role" style="margin-top:8px"><b>Faculty</b><em>reports &amp; attendance</em></div>
+      <div class="role" style="margin-top:8px"><b>Maintenance</b><em>assigned jobs</em></div>
+      <div class="role" style="margin-top:8px"><b>Estates</b><em>records &amp; triage</em></div>
+      <div class="role" style="margin-top:8px"><b>Admin</b><em>decisions &amp; users</em></div>
+      <div class="role platform" style="margin-top:14px"><b>Platform admin</b><em>onboarding only</em></div>
+      <div style="font-size:11.5px;color:var(--gray);margin-top:8px;line-height:1.4">No self-registration for staff roles; the college admin creates them.</div>
+    </div>
+
+    <div class="arrow">
+      <span>sign in</span>
+      <svg width="38" height="18" viewBox="0 0 38 18"><line x1="0" y1="9" x2="28" y2="9" stroke="#5245F8" stroke-width="2"/><polygon points="28,3 38,9 28,15" fill="#5245F8"/></svg>
+    </div>
+
+    <div class="col browser">
+      <p class="label">02 &nbsp;Browser</p>
+      <div class="panel">
+        <h3>React 19 single-page app</h3>
+        <div class="sub">TypeScript &middot; Vite 8 &middot; Tailwind CSS 4</div>
+        <div class="item"><b>Landing &amp; sign-in</b><span>Role tiles, college selector, demo strip</span></div>
+        <div class="item"><b>Personal workspace</b><span>Home &middot; Report &middot; My reports &middot; Attendance</span></div>
+        <div class="item"><b>Staff workspace</b><span>Overview &middot; Inventory &middot; Gaps &middot; Resources &middot; Issues &middot; Plan</span></div>
+        <div class="item"><b>Accessible by design</b><span>360 px layouts, 44 px targets, visible focus</span></div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <span>JSON<br/>+ cookie</span>
+      <svg width="38" height="18" viewBox="0 0 38 18"><line x1="0" y1="9" x2="28" y2="9" stroke="#5245F8" stroke-width="2"/><polygon points="28,3 38,9 28,15" fill="#5245F8"/></svg>
+    </div>
+
+    <div class="col server">
+      <p class="label">03 &nbsp;Application server</p>
+      <div class="panel">
+        <h3>Node.js 24 HTTP API</h3>
+        <div class="sub">Serves the built app and every request</div>
+        <div class="item"><b>Session authentication</b><span>scrypt hashes, hashed tokens, login rate limiting</span></div>
+        <div class="item"><b>Capability checks</b><span>Role matrix enforced on the server, not the UI</span></div>
+        <div class="item"><b>Validation &amp; imports</b><span>Per-sheet mapping, preview, append or replace</span></div>
+        <div class="item"><b>Deterministic analysis</b><span>Capacity gap, consumption, maintenance priority</span></div>
+        <div class="item"><b>Report &amp; print</b><span>Point-in-time exports with basis tags</span></div>
+        <div class="item"><b>Audit trail</b><span>Actor, time, change and reason</span></div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <span>SQL</span>
+      <svg width="38" height="18" viewBox="0 0 38 18"><line x1="0" y1="9" x2="28" y2="9" stroke="#5245F8" stroke-width="2"/><polygon points="28,3 38,9 28,15" fill="#5245F8"/></svg>
+    </div>
+
+    <div class="col db">
+      <p class="label">04 &nbsp;Local database</p>
+      <div class="panel">
+        <h3>SQLite via node:sqlite</h3>
+        <div class="sub">One file on the demonstration server</div>
+        <div class="item"><b>Colleges &amp; memberships</b><span>Demo or pilot mode, role per college</span></div>
+        <div class="item"><b>Inventory &amp; assets</b><span>Buildings, rooms, capacities, condition</span></div>
+        <div class="item"><b>Meters &amp; readings</b><span>Measured or estimated; missing stays missing</span></div>
+        <div class="item"><b>Complaints &amp; inspections</b><span>Timeline, assignment, work notes</span></div>
+        <div class="item"><b>Options &amp; decisions</b><span>Proposed, approved, rejected, deferred</span></div>
+        <div class="item"><b>Imports &amp; audit</b><span>Provenance per record, history per action</span></div>
+        <div class="scope">Every college row carries college_id and is re-checked against the session.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ai">
+    <div class="tag">Optional AI</div>
+    <p><b>Explanation proxy only.</b> The server may send already-computed facts to a configured model to draft an explanation. It cannot calculate, approve, assign, delete or authorise anything, and every output is labelled <b>&ldquo;AI-generated &mdash; please verify&rdquo;</b>.</p>
+    <div class="src">keys stay in server env</div>
+  </div>
+
+  <div class="foot">
+    <div><b>Calculations before AI.</b> The rule-based explanation works with no model configured.</div>
+    <div>MicroCity &middot; proposed architecture &middot; 2026</div>
+  </div>
+</div>
+</body>
+</html>
